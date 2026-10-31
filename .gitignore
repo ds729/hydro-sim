@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+# 公開しないもの（開発メモ・判断の記録・参照画像・Claude Code の設定）。ローカルにだけ置く
+CLAUDE.md
+docs/
+.claude/
