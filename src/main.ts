@@ -3,6 +3,7 @@
 import './ui/style.css';
 import { applyCommand, createSim, cropSpec, tick, type Command, type SimState } from './sim';
 import { PRESETS, type PresetName } from './render/camera';
+import { modelStatus } from './render/models';
 import { View } from './render/view';
 import { Hud } from './ui/hud';
 import { showResult } from './ui/result';
@@ -102,5 +103,7 @@ Object.assign(window, {
     camera(name: PresetName, instant = true) { view.rig.goTo(name, instant); },
     toggleMenu() { menu.click(); },
     renderInfo() { return { ...view.renderer.info.render }; },
+    /** .glb の読み込み状態（'ok' / 'error: <URL>'） */
+    models: modelStatus,
   },
 });

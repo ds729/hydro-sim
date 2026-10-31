@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { bedOf, diagnose, type Factor, type SimState } from '../sim';
 import { Builder, LED, mat } from './build';
+import { loadModel } from './models';
 import { Monitor } from './monitor';
 
 /** 栽培槽：幅・奥行き・水位の最大高さ・トレイの高さ・底板の上面 */
@@ -131,7 +132,11 @@ export class Diorama {
     sc.add(this.pumpLed);
     b.box(0.7, 0.4, 0.5, 0xd9a05b, -3.2, 0.2, 2.6);
     b.box(0.7, 0.4, 0.5, 0xc88c47, -3.2, 0.6, 2.6);
-    b.box(0.7, 0.4, 0.5, 0xd9a05b, -2.4, 0.2, 2.7);
+    // 木箱の1つは .glb（v0.5 のダミー。読み込みとパスの確認用で、Phase 2 で本物のモデルに置き換える）
+    loadModel('dummy-crate').then(m => {
+      m.position.set(-2.4, 0, 2.7);
+      sc.add(m);
+    }, e => console.error(e));
   }
 
   /** 栽培槽（主役）：ガラス槽・水・浮きトレイ・LED・センサ・苗 */
