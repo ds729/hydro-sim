@@ -1,0 +1,123 @@
+import { describe, expect, test } from 'vitest';
+import { applyCommand, bedOf, createSim, cropSpec, diagnose, ecOf, mulberry32, tick, type Command, type SimState } from './index';
+
+const fert: Command = { type: 'dose', target: 'bed', supply: 'fertilizer', amount: 10 };
+const water: Command = { type: 'dose', target: 'bed', supply: 'water', amount: 0.2 };
+const phDown: Command = { type: 'dose', target: 'bed', supply: 'phDown', amount: 1 };
+const phUp: Command = { type: 'dose', target: 'bed', supply: 'phUp', amount: 1 };
+
+/** 終わるまで進める。each は毎 tick の前に呼ぶ */
+function runToEnd(s: SimState, each: (s: SimState) => void = () => {}) {
+  for (let i = 0; i < 10000 && !s.result; i++) { each(s); tick(s); }
+  return s.result!;
+}
+
+/** 適正帯の中ほどに保つ簡単な制御（自動制御ルールモードと同じくコマンドだけで操作する） */
+function keepOptimal(s: SimState) {
+  const b = bedOf(s);
+  if (b.ph > 6.3) applyCommand(s, phDown);
+  if (b.water < 1.6 || (ecOf(b) > 1.4 && b.water < 2)) applyCommand(s, water);
+  if (ecOf(b) < 1.0) applyCommand(s, fert);
+}
+
+describe('roadmap Phase 1 の完了条件', () => {
+  test('最適条件なら規定日数±5%で収穫できる', () => {
+    const s = createSim(), hours = cropSpec(s).days * 24;
+    let minFit = 1;
+    const r = runToEnd(s, s => { keepOptimal(s); minFit = Math.min(minFit, diagnose(s).worst.value); });
+    expect(minFit).toBe(1);
+    expect(r.outcome).toBe('harvest');
+    expect(s.hour).toBeGreaterThanOrEqual(hours * 0.95);
+    expect(s.hour).toBeLessThanOrEqual(hours * 1.05);
+    expect(r.grade).toBe('S');
+  });
+
+  test('無操作だと EC が単調に上がり、v0.4.1 と同じく Day 11 に枯死する', () => {
+    const s = createSim();
+    let prev = ecOf(bedOf(s));
+    const r = runToEnd(s, s => {
+      const ec = ecOf(bedOf(s));
+      expect(ec).toBeGreaterThanOrEqual(prev);
+      prev = ec;
+    });
+    expect(ecOf(bedOf(s))).toBeGreaterThan(prev - 1e-12);
+    expect(r.outcome).toBe('dead');
+    expect(s.hour).toBe(263);
+  });
+
+  test('pH 9 まで上げると枯死する', () => {
+    const s = createSim();
+    for (let i = 0; i < 10; i++) applyCommand(s, phUp);
+    expect(bedOf(s).ph).toBe(9);
+    expect(runToEnd(s).outcome).toBe('dead');
+  });
+
+  test('6時間ごとに肥料を入れると EC 過多で、v0.4.1 と同じく Day 5 に枯死する', () => {
+    const s = createSim();
+    const r = runToEnd(s, s => { if (s.hour % 6 === 0) applyCommand(s, fert); });
+    expect(r.outcome).toBe('dead');
+    expect(s.hour).toBe(103);
+    expect(r.cost).toBe(540);
+    expect(r.profit).toBe(-540);
+  });
+});
+
+describe('コマンド', () => {
+  test('資材の効果と費用', () => {
+    const s = createSim(), b = bedOf(s);
+    applyCommand(s, fert);
+    expect(ecOf(b)).toBeCloseTo(1.35);
+    applyCommand(s, water);
+    expect(b.water).toBeCloseTo(2.2);
+    expect(s.cost).toBe(30);
+    expect(s.log.at(-1)).toEqual({ hour: 0, kind: 'command', command: water });
+  });
+
+  test('液量は容量、pH は 3〜9 で頭打ち', () => {
+    const s = createSim(), b = bedOf(s);
+    for (let i = 0; i < 20; i++) { applyCommand(s, water); applyCommand(s, phDown); }
+    expect(b.water).toBe(3);
+    expect(b.ph).toBe(3);
+  });
+
+  test('全交換で初期組成に戻る', () => {
+    const s = createSim(), b = bedOf(s);
+    for (let i = 0; i < 50; i++) tick(s);
+    applyCommand(s, fert);
+    applyCommand(s, { type: 'replaceSolution', target: 'bed' });
+    expect([b.water, ecOf(b), b.ph]).toEqual([2, 1.2, 6]);
+    expect(s.cost).toBe(130);
+  });
+
+  test('終わった後は受け付けない', () => {
+    const s = createSim();
+    runToEnd(s);
+    const cost = s.cost, n = s.log.length;
+    expect(applyCommand(s, fert)).toBe(false);
+    expect([s.cost, s.log.length]).toEqual([cost, n]);
+  });
+});
+
+describe('記録', () => {
+  test('毎朝の定点記録と、外れ続けた要因の観察メモが出る', () => {
+    const s = createSim();
+    for (let i = 0; i < 10; i++) applyCommand(s, phUp);
+    for (let i = 0; i < 24; i++) tick(s);
+    expect(s.log.filter(e => e.kind === 'morning').map(e => e.hour)).toEqual([24]);
+    const advice = s.log.filter(e => e.kind === 'advice');
+    expect(advice).toHaveLength(1);
+    expect(advice[0]).toMatchObject({ hour: 3, factor: 'ph', side: 'high' });
+    expect(s.history).toHaveLength(12);
+  });
+
+  test('同じシードと操作なら同じ経過になる（状態はプレーンなデータ）', () => {
+    const play = (seed: number) => {
+      const s = createSim({ seed }), r = mulberry32(seed), cmds = [fert, water, phDown, phUp];
+      runToEnd(s, s => { if (r() < 0.1) applyCommand(s, cmds[Math.floor(r() * cmds.length)]); });
+      return JSON.stringify(s);
+    };
+    expect(play(7)).toBe(play(7));
+    expect(play(7)).not.toBe(play(8));
+    expect(structuredClone(createSim())).toEqual(createSim());
+  });
+});

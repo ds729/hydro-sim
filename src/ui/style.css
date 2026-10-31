@@ -1,0 +1,20 @@
+:root{--b1:#f7f1e5;--b2:#e9dfca;--pn:rgba(255,251,240,.92);--fg:#16301f;--mu:#587262;--ln:rgba(0,0,0,.14);--ac:#1f7a4d;--bt:rgba(0,0,0,.06);box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--b1:#232a52;--b2:#4a4478;--pn:rgba(38,33,52,.9);--fg:#e3f3e8;--mu:#8fae9b;--ln:rgba(255,255,255,.16);--ac:#5fd49a;--bt:rgba(255,255,255,.08)}}
+:root[data-theme="dark"]{--b1:#232a52;--b2:#4a4478;--pn:rgba(38,33,52,.9);--fg:#e3f3e8;--mu:#8fae9b;--ln:rgba(255,255,255,.16);--ac:#5fd49a;--bt:rgba(255,255,255,.08)}
+html,body{height:100%;margin:0}body{background:linear-gradient(180deg,var(--b1),var(--b2));color:var(--fg);font:13px/1.5 "Zen Maru Gothic","Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;overflow:hidden}
+#app{position:relative;height:100%}canvas{display:block;width:100%;height:100%;touch-action:none}
+.pn{position:absolute;background:var(--pn);backdrop-filter:blur(8px);border:1px solid var(--ln);border-radius:18px;padding:10px 14px}
+#hud{left:10px;top:10px;width:250px}#side{position:absolute;right:10px;top:10px;width:220px;display:flex;flex-direction:column;gap:8px}#side .pn{position:static}#log{font-size:12px}#jl{max-height:190px;overflow-y:auto}.jn{padding:4px 6px;border-bottom:1px dashed var(--ln);line-height:1.45}.jn small{color:var(--mu)}.jn.o{background:var(--bt);border-left:3px solid var(--ac);border-radius:6px}#bar{left:50%;transform:translateX(-50%);bottom:12px;display:flex;gap:8px;padding:8px 12px;border-radius:22px}.tl{width:66px;display:flex;flex-direction:column;align-items:center;margin:0;padding:6px 2px;border-radius:16px}.tl b{font-size:24px;line-height:1.2}.tl span{font-size:11px;font-weight:700}.tl em{font-size:10px;color:var(--mu);font-style:normal}@keyframes pp{0%{transform:scale(1)}40%{transform:scale(.86)}70%{transform:scale(1.08)}100%{transform:scale(1)}}.tap{animation:pp .28s}@media(prefers-reduced-motion:reduce){.tap{animation:none}}
+.row{margin:0 0 8px}.row b{font-weight:600}.row span{float:right;font-variant-numeric:tabular-nums}
+.tr{position:relative;height:8px;border-radius:4px;margin-top:3px}.mk{position:absolute;top:-3px;width:3px;height:14px;background:var(--fg);border-radius:2px;transform:translateX(-50%)}
+.bar{height:6px;border-radius:3px;background:var(--bt);margin-top:3px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac)}
+button{font:inherit;color:var(--fg);background:var(--bt);border:1px solid var(--ln);border-radius:12px;padding:6px 8px;cursor:pointer;margin:0 4px 6px 0}button:hover{border-color:var(--ac)}button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:4px}.g button{margin:0}h3{margin:6px 0 6px;font-size:12px;color:var(--mu);font-weight:600}
+small{color:var(--mu);font-size:11px;display:block;margin-top:6px}
+#res{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}#res .pn{position:static;width:300px;padding:18px}
+#res h2{margin:0 0 8px;font-size:18px}#res table{width:100%;margin:8px 0 12px}#res td:last-child{text-align:right}
+.hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 8px;margin:0 0 8px}#cn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;font-size:12px;color:var(--mu)}#mb,.sn{display:none}#mb.nw::after{content:'●';color:#e0a100;margin-left:3px}
+/* スマホ幅：HUD は上端に横長で詰め、時間・カメラ・日誌は ☰ で開閉する */
+@media(max-width:720px),(max-height:500px){#hud{left:8px;right:8px;top:8px;width:auto;padding:8px 10px;font-size:11px;border-radius:14px}.hd{flex-wrap:nowrap;margin-bottom:4px}#cn{flex:1;min-width:0;font-size:11px}#mb{display:block;margin:0;padding:2px 10px;flex:none}
+#gs{display:grid;grid-template-columns:repeat(3,1fr);gap:0 12px}#gh{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}#hud .row{margin-bottom:4px}#ch,.ln{display:none}.sn{display:block;margin-top:2px}
+#side{display:none;left:8px;right:8px;width:auto;overflow-y:auto}#app.so #side{display:flex}#jl{max-height:28vh}.tl{width:54px}#bar{gap:4px;padding:6px 8px}}

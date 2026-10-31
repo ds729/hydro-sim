@@ -1,0 +1,20 @@
+{
+  "radish": {
+    "name": "ラディッシュ（マイクログリーン）",
+    "days": 8,
+    "harvest": "once",
+    "bands": {
+      "ec": [0.2, 0.8, 1.6, 2.4],
+      "ph": [4.8, 5.8, 6.5, 7.5],
+      "water": [0.4, 1.2, 2.2, 2.8]
+    },
+    "uptake": {
+      "waterLph": 0.006,
+      "activity": [0.3, 0.7],
+      "saltRatio": 0.6,
+      "phDriftPerH": 0.01
+    },
+    "yieldG": 80,
+    "pricePer100g": 1200
+  }
+}

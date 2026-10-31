@@ -1,0 +1,7 @@
+{
+  "fertilizer": { "name": "肥料", "unit": "mL", "pricePerUnit": 3, "perUnit": { "salts": 0.03 } },
+  "water": { "name": "水", "unit": "L", "pricePerUnit": 0, "perUnit": { "water": 1 } },
+  "phDown": { "name": "pHダウン剤", "unit": "回", "pricePerUnit": 20, "perUnit": { "ph": -0.3 } },
+  "phUp": { "name": "pHアップ剤", "unit": "回", "pricePerUnit": 20, "perUnit": { "ph": 0.3 } },
+  "solution": { "name": "養液（全交換）", "unit": "回", "pricePerUnit": 100, "perUnit": {} }
+}

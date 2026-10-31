@@ -1,188 +1,29 @@
-<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>水耕栽培シミュレータ v0.4.1</title>
-<style>
-:root{--b1:#f7f1e5;--b2:#e9dfca;--pn:rgba(255,251,240,.92);--fg:#16301f;--mu:#587262;--ln:rgba(0,0,0,.14);--ac:#1f7a4d;--bt:rgba(0,0,0,.06);box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--b1:#232a52;--b2:#4a4478;--pn:rgba(38,33,52,.9);--fg:#e3f3e8;--mu:#8fae9b;--ln:rgba(255,255,255,.16);--ac:#5fd49a;--bt:rgba(255,255,255,.08)}}
-:root[data-theme="dark"]{--b1:#232a52;--b2:#4a4478;--pn:rgba(38,33,52,.9);--fg:#e3f3e8;--mu:#8fae9b;--ln:rgba(255,255,255,.16);--ac:#5fd49a;--bt:rgba(255,255,255,.08)}
-html,body{height:100%;margin:0}body{background:linear-gradient(180deg,var(--b1),var(--b2));color:var(--fg);font:13px/1.5 "Zen Maru Gothic","Hiragino Maru Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;overflow:hidden}
-#app{position:relative;height:100%}canvas{display:block;width:100%;height:100%;touch-action:none}
-.pn{position:absolute;background:var(--pn);backdrop-filter:blur(8px);border:1px solid var(--ln);border-radius:18px;padding:10px 14px}
-#hud{left:10px;top:10px;width:250px}#side{position:absolute;right:10px;top:10px;width:220px;display:flex;flex-direction:column;gap:8px}#side .pn{position:static}#log{font-size:12px}#jl{max-height:190px;overflow-y:auto}.jn{padding:4px 6px;border-bottom:1px dashed var(--ln);line-height:1.45}.jn small{color:var(--mu)}.jn.o{background:var(--bt);border-left:3px solid var(--ac);border-radius:6px}#bar{left:50%;transform:translateX(-50%);bottom:12px;display:flex;gap:8px;padding:8px 12px;border-radius:22px}.tl{width:66px;display:flex;flex-direction:column;align-items:center;margin:0;padding:6px 2px;border-radius:16px}.tl b{font-size:24px;line-height:1.2}.tl span{font-size:11px;font-weight:700}.tl em{font-size:10px;color:var(--mu);font-style:normal}@keyframes pp{0%{transform:scale(1)}40%{transform:scale(.86)}70%{transform:scale(1.08)}100%{transform:scale(1)}}.tap{animation:pp .28s}@media(prefers-reduced-motion:reduce){.tap{animation:none}}
-.row{margin:0 0 8px}.row b{font-weight:600}.row span{float:right;font-variant-numeric:tabular-nums}
-.tr{position:relative;height:8px;border-radius:4px;margin-top:3px}.mk{position:absolute;top:-3px;width:3px;height:14px;background:var(--fg);border-radius:2px;transform:translateX(-50%)}
-.bar{height:6px;border-radius:3px;background:var(--bt);margin-top:3px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac)}
-button{font:inherit;color:var(--fg);background:var(--bt);border:1px solid var(--ln);border-radius:12px;padding:6px 8px;cursor:pointer;margin:0 4px 6px 0}button:hover{border-color:var(--ac)}button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
-.g{display:grid;grid-template-columns:1fr 1fr;gap:4px}.g button{margin:0}h3{margin:6px 0 6px;font-size:12px;color:var(--mu);font-weight:600}
-small{color:var(--mu);font-size:11px;display:block;margin-top:6px}
-#res{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}#res .pn{position:static;width:300px;padding:18px}
-#res h2{margin:0 0 8px;font-size:18px}#res table{width:100%;margin:8px 0 12px}#res td:last-child{text-align:right}
-.hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 8px;margin:0 0 8px}#cn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;font-size:12px;color:var(--mu)}#mb,.sn{display:none}#mb.nw::after{content:'●';color:#e0a100;margin-left:3px}
-/* スマホ幅：HUD は上端に横長で詰め、時間・カメラ・日誌は ☰ で開閉する */
-@media(max-width:720px),(max-height:500px){#hud{left:8px;right:8px;top:8px;width:auto;padding:8px 10px;font-size:11px;border-radius:14px}.hd{flex-wrap:nowrap;margin-bottom:4px}#cn{flex:1;min-width:0;font-size:11px}#mb{display:block;margin:0;padding:2px 10px;flex:none}
-#gs{display:grid;grid-template-columns:repeat(3,1fr);gap:0 12px}#gh{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}#hud .row{margin-bottom:4px}#ch,.ln{display:none}.sn{display:block;margin-top:2px}
-#side{display:none;left:8px;right:8px;width:auto;overflow-y:auto}#app.so #side{display:flex}#jl{max-height:28vh}.tl{width:54px}#bar{gap:4px;padding:6px 8px}}
-</style><link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet"></head><body><div id="app"><canvas id="cv"></canvas>
-<div class="pn" id="hud"><div class="hd"><b id="day">Day 1 / 8</b><span id="cn"></span><button id="mb" aria-expanded="false" title="時間・カメラ・栽培日誌を開く">☰ 時間・日誌</button></div><div id="gs"></div>
-<div id="gh"><div class="row">生育<div class="bar"><i id="gb"></i></div></div><div class="row">健康<div class="bar"><i id="hb"></i></div></div></div>
-<canvas id="ch" width="230" height="64" style="width:100%;height:64px"></canvas>
-<small class="ln">緑＝EC　青＝pH（適正帯は各ゲージの緑）<br>※数値は仮置きの簡略モデルです。実栽培は地域の試験場等で確認してください。</small><small class="sn">※数値は仮置きの簡略モデルです</small></div>
-<div id="side"><div class="pn" id="act"><h3>時間</h3><div id="sp"></div><h3>カメラ</h3><div id="cm"></div>
+<title>水耕栽培シミュレータ v0.5（開発版）</title>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<div id="app">
+  <canvas id="cv"></canvas>
+  <div class="pn" id="hud">
+    <div class="hd"><b id="day"></b><span id="cn"></span><button id="mb" aria-expanded="false" title="時間・カメラ・栽培日誌を開く">☰ 時間・日誌</button></div>
+    <div id="gs"></div>
+    <div id="gh"><div class="row">生育<div class="bar"><i id="gb"></i></div></div><div class="row">健康<div class="bar"><i id="hb"></i></div></div></div>
+    <canvas id="ch" width="230" height="64" style="width:100%;height:64px"></canvas>
+    <small class="ln">緑＝EC　青＝pH（適正帯は各ゲージの緑）<br>※数値は仮置きの簡略モデルです。実栽培は地域の試験場等で確認してください。</small>
+    <small class="sn">※数値は仮置きの簡略モデルです</small>
+  </div>
+  <div id="side">
+    <div class="pn" id="act"><h3>時間</h3><div id="sp"></div><h3>カメラ</h3><div id="cm"></div></div>
+    <div class="pn" id="log"><h3>📖 栽培日誌</h3><div id="jl"></div></div>
+  </div>
+  <div class="pn" id="bar"></div>
+  <div id="res"><div class="pn" id="rb"></div></div>
 </div>
-<div class="pn" id="log"></div></div><div class="pn" id="bar"><button class="tl" data-a="fert" data-k="1" title="肥料を10mL追加（ECが上がる）（キー1）"><b>🧪</b><span>肥料</span><em>¥30</em></button><button class="tl" data-a="water" data-k="2" title="水を0.2L追加（ECが下がり、液量が増える）（キー2）"><b>💧</b><span>水</span><em>無料</em></button><button class="tl" data-a="phd" data-k="3" title="pHを0.3下げる（キー3）"><b>🔽</b><span>pHダウン</span><em>¥20</em></button><button class="tl" data-a="phu" data-k="4" title="pHを0.3上げる（キー4）"><b>🔼</b><span>pHアップ</span><em>¥20</em></button><button class="tl" data-a="swap" data-k="5" title="養液を初期状態に入れ替える（キー5）"><b>♻️</b><span>全交換</span><em>¥100</em></button></div>
-<div id="res"><div class="pn" id="rb"></div></div></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script>
-// ===== sim層（three.js非依存） =====
-const C={name:'ラディッシュ（マイクログリーン）',days:8,ec:[.2,.8,1.6,2.4],ph:[4.8,5.8,6.5,7.5],wt:[.4,1.2,2.2,2.8],yg:80,pr:1200},CAP=3;
-const trap=(x,[a,b,c,d])=>x<=a||x>=d?0:x<b?(x-a)/(b-a):x<=c?1:(d-x)/(d-c);
-const NM={ec:'EC',ph:'pH',wt:'液量'};let S;
-const ECv=()=>S.salt/S.water,F=()=>({ec:trap(ECv(),C.ec),ph:trap(S.ph,C.ph),wt:trap(S.water,C.wt)});
-function init(){S={h:0,water:2,salt:2.4,ph:6,g:0,hp:100,qa:0,cost:0,done:0,low:{ec:0,ph:0,wt:0},cd:{},hist:[],log:[]};say('栽培開始。EC・pH・液量を適正帯（緑）に保とう。')}
-function say(t,k='a'){S.log.unshift({h:S.h,t,k});S.log.length=Math.min(S.log.length,12)}
-const ADV={ec:[v=>`EC ${v}：肥料濃度が低く、養分不足で成長が遅れています。肥料を追加しましょう。`,v=>`EC ${v}：濃度が高すぎます。濃度障害で吸水が妨げられます。水を足して薄めるか、養液を交換しましょう。`],
-ph:[v=>`pH ${v}：酸性すぎて根が傷みます。pHアップで調整を。`,v=>`pH ${v}：高すぎて鉄などの微量要素が吸収しにくくなります。pHダウンで調整を。`],
-wt:[v=>`液量 ${v}L：少なすぎます。養液が濃縮しやすく根も乾きます。水を足しましょう。`,v=>`液量 ${v}L：多すぎて根の酸素が不足し、根腐れの恐れがあります。`]};
-function tick(){const g=S.g,et=.006*(.3+.7*g),ec=ECv();
-S.water=Math.max(.05,S.water-et);S.salt=Math.max(0,S.salt-et*ec*.6);S.ph+=.01*(.3+.7*g);
-const f=F(),m=Math.min(f.ec,f.ph,f.wt);S.g=Math.min(1,S.g+m/(C.days*24));
-S.hp=m<.5?S.hp-(.5-m)*3:m>.9?Math.min(100,S.hp+.3):S.hp;S.qa+=m;S.h++;if(S.h%24==0)say('朝の記録：EC '+ECv().toFixed(1)+'、pH '+S.ph.toFixed(1)+'、液量 '+S.water.toFixed(1)+'L、生育 '+Math.round(S.g*100)+'%','d');
-const val={ec:ECv().toFixed(1),ph:S.ph.toFixed(1),wt:S.water.toFixed(1)},cur={ec:ECv(),ph:S.ph,wt:S.water};
-for(const k in f){S.low[k]=f[k]<.7?S.low[k]+1:0;
-if(S.low[k]>=3&&S.h-(S.cd[k]??-99)>=24){S.cd[k]=S.h;const r=C[k];say(ADV[k][cur[k]<(r[1]+r[2])/2?0:1](val[k]),'o')}}
-if(S.h%2==0)S.hist.push([ECv(),S.ph]);
-if(S.hp<=0)end('dead');else if(S.g>=1)end('ok');else if(S.h>C.days*48)end('late')}
-function act(a){if(S.done)return;
-if(a=='fert'){S.salt+=.3;S.cost+=30;say('肥料を10mL追加（ECが上がります）')}
-if(a=='water'){S.water=Math.min(CAP,S.water+.2);say('水を0.2L追加（ECが薄まり、液量が増えます）')}
-if(a=='phd'){S.ph=Math.max(3,S.ph-.3);S.cost+=20;say('pHダウン剤を投入')}
-if(a=='phu'){S.ph=Math.min(9,S.ph+.3);S.cost+=20;say('pHアップ剤を投入')}
-if(a=='swap'){S.water=2;S.salt=2.4;S.ph=6;S.cost+=100;say('養液を全交換（EC1.2・pH6.0・2.0Lに戻りました）')}dirty=1}
-function end(k){const q=S.qa/S.h,gr=q>=.95?['S',1.2]:q>=.85?['A',1]:q>=.7?['B',.7]:['C',.4];
-const y=k=='ok'?C.yg*Math.sqrt(Math.max(0,S.hp)/100)*q:0,sales=y/100*C.pr*gr[1];S.done={k,q,g:gr[0],y,sales,profit:sales-S.cost};showRes()}
-// ===== three.js（工場の箱庭・ローポリ）=====
-const cv=document.getElementById('cv'),R=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:true});R.setPixelRatio(Math.min(devicePixelRatio,2));R.shadowMap.enabled=true;R.shadowMap.type=THREE.PCFSoftShadowMap;
-const sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(34,1,.1,200);
-sc.add(new THREE.HemisphereLight(0xfff4e6,0xa9b8d8,.8));
-const sp=new THREE.DirectionalLight(0xffefd6,.95);sp.position.set(6,9,5);sp.castShadow=true;sp.shadow.mapSize.set(2048,2048);Object.assign(sp.shadow.camera,{left:-9,right:9,top:9,bottom:-9,near:1,far:30});sc.add(sp);
-const fm=(c,o)=>new THREE.MeshStandardMaterial(Object.assign({color:c,flatShading:true,roughness:.85},o));let PA=sc;
-const add=(m,x,y,z,cs=1)=>{m.position.set(x,y,z);m.castShadow=!!cs;m.receiveShadow=true;PA.add(m);return m};
-const bx=(w,h,d,c,x,y,z,o)=>add(new THREE.Mesh(new THREE.BoxGeometry(w,h,d),fm(c,o)),x,y,z);
-const cy=(r,h,c,x,y,z,o,sg=8)=>add(new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,sg),fm(c,o)),x,y,z);
-const LED={emissive:0xffa8e0,emissiveIntensity:1};
-const gr=new THREE.Mesh(new THREE.PlaneGeometry(50,50),new THREE.ShadowMaterial({opacity:.16}));gr.rotation.x=-Math.PI/2;gr.position.y=-1.26;gr.receiveShadow=true;sc.add(gr);
-// 部屋（手前の壁と天井は外した断面）
-bx(9.4,.36,7.4,0xdcd8d0,0,-.18,0);bx(9.4,.9,7.4,0x8f7f70,0,-.81,0);
-bx(9.4,4.6,.3,0xcfe1d4,0,2.3,-3.55);bx(.3,4.6,7.4,0xc6dccf,-4.55,2.3,0);bx(9.4,.4,.34,0x9fb8aa,0,.2,-3.55);bx(.34,.4,7.4,0x9fb8aa,-4.55,.2,0);
-bx(9.4,.12,.42,0xeee9df,0,4.66,-3.55);bx(.42,.12,7.4,0xeee9df,-4.55,4.66,0);
-for(let i=0;i<8;i++)bx(.08,4.2,.06,0xb7cfc0,-4+i*1.15,2.4,-3.38);
-cy(.07,9,0x9aa5ad,0,4.1,-3.3).rotation.z=Math.PI/2;
-for(const[x,z,w,d]of[[.6,-.7,4.8,.08],[.6,2.3,4.8,.08],[-1.8,.8,.08,3],[3,.8,.08,3]])bx(w,.012,d,0xf2c230,x,.006,z,{});
-// 補助ラック（奥の壁沿い・飾り）
-const cl=[];function rack(x,z){for(const a of[-1,1])for(const b of[-1,1])cy(.04,2.8,0xa9b3bb,x+a*1.1,1.4,z+b*.42,{},6);
-for(let t=0;t<3;t++){const y=.5+t*.85;bx(2.3,.06,.95,0xe8eef2,x,y,z);bx(2.0,.06,.2,0xffffff,x,y+.55,z,LED);
-for(let k=0;k<13;k++)cl.push([x-.95+k*.15+Math.random()*.05,y+.1,z+(Math.random()-.5)*.6,.08+Math.random()*.06])}}
-rack(-2.4,-2.8);rack(3.2,-2.8);
-const cI=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,0),fm(0xffffff),cl.length),du=new THREE.Object3D(),tc=new THREE.Color();
-cl.forEach((q,i)=>{du.position.set(q[0],q[1],q[2]);du.scale.set(q[3],q[3]*.8,q[3]);du.rotation.y=i;du.updateMatrix();cI.setMatrixAt(i,du.matrix);cI.setColorAt(i,tc.setHSL(.27+Math.random()*.06,.5,.42+Math.random()*.12))});cI.castShadow=true;sc.add(cI);
-// 制御盤・状態ランプ
-bx(.5,2.1,1.3,0xe9e4da,-4.15,1.05,.6);bx(.04,1.7,1.0,0xd3cdc0,-3.89,1.05,.6,{});
-const LP=[1.75,1.55,1.35].map(y=>{const m=new THREE.Mesh(new THREE.SphereGeometry(.07,8,6),fm(0x5fe09a,{emissive:0x5fe09a,emissiveIntensity:.9}));m.position.set(-3.86,y,.6);sc.add(m);return m});
-// モニタ（CanvasTexture）
-bx(2.6,1.5,.12,0x2d3640,0,2.7,-3.38);const c2=document.createElement('canvas');c2.width=512;c2.height=278;const sx=c2.getContext('2d'),tex=new THREE.CanvasTexture(c2);
-const scr=new THREE.Mesh(new THREE.PlaneGeometry(2.4,1.3),new THREE.MeshBasicMaterial({map:tex}));scr.position.set(0,2.7,-3.31);sc.add(scr);
-function drawScr(f){const x=sx;x.fillStyle='#0f2a2e';x.fillRect(0,0,512,278);x.font='bold 22px sans-serif';x.fillStyle='#8be3c4';const dy=Math.floor(S.h/24)+1;x.fillText('養液モニタ　Day '+dy+(dy>C.days?'（超過）':''),16,32);
-[['EC',ECv().toFixed(2),f.ec],['pH',S.ph.toFixed(2),f.ph],['液量',S.water.toFixed(2)+' L',f.wt]].forEach(([l,v,q],i)=>{const y=86+i*50;x.fillStyle=q>.9?'#5fe09a':q>.5?'#f2c230':'#ff6b6b';x.beginPath();x.arc(26,y-9,9,0,6.3);x.fill();x.fillStyle='#d9efe6';x.font='20px sans-serif';x.fillText(l,46,y);x.font='bold 30px sans-serif';x.fillText(v,120,y)});
-x.strokeStyle='#2c5a5e';x.lineWidth=1;x.strokeRect(300,50,196,130);[[0,0,3,'#5fe09a'],[1,4,8,'#6aa8ff']].forEach(([i,lo,hi,c])=>{x.strokeStyle=c;x.lineWidth=2;x.beginPath();S.hist.forEach((q,j)=>{const X=300+j/(C.days*12)*196,Y=180-(q[i]-lo)/(hi-lo)*130;j?x.lineTo(X,Y):x.moveTo(X,Y)});x.stroke()});
-x.fillStyle='#d9efe6';x.font='16px sans-serif';x.fillText('生育 '+Math.round(S.g*100)+'%　健康 '+Math.max(0,Math.round(S.hp))+'%',16,236);x.fillStyle='#1f4a4e';x.fillRect(16,246,480,14);x.fillStyle='#5fe09a';x.fillRect(16,246,480*S.g,14);tex.needsUpdate=true}
-// 養液タンク・ポンプ・配管・木箱
-cy(.45,1.1,0x4c88c7,3.7,.55,1.0,{},10);cy(.47,.08,0x2f5f95,3.7,1.14,1.0,{},10);cy(.06,1,0x9aa5ad,3.1,.5,1.0).rotation.z=Math.PI/2;
-bx(.4,.3,.35,0x3d4a55,3.1,.15,.2);cy(.05,.9,0x9aa5ad,3.4,.3,.6).rotation.x=Math.PI/2;const pLed=new THREE.Mesh(new THREE.SphereGeometry(.05,6,5),fm(0x5fe09a,{emissive:0x5fe09a}));pLed.position.set(3.1,.34,.2);sc.add(pLed);
-bx(.7,.4,.5,0xd9a05b,-3.2,.2,2.6);bx(.7,.4,.5,0xc88c47,-3.2,.6,2.6);bx(.7,.4,.5,0xd9a05b,-2.4,.2,2.7);
-// 栽培槽（主役）
-const tg=new THREE.Group();tg.position.set(.6,0,.8);sc.add(tg);PA=tg;
-const W=4,D=2.4,HM=1.45,TY=1.8,WB=.23;
-bx(W+.3,.23,D+.3,0x6f7f8c,0,.115,0);
-const glass=new THREE.Mesh(new THREE.BoxGeometry(W,2.1,D),fm(0xcdeeff,{transparent:true,opacity:.14,depthWrite:false}));glass.position.y=WB+1.05;tg.add(glass);
-for(const a of[-1,1])for(const b of[-1,1])cy(.05,3.1,0xa9b3bb,a*W/2,1.55,b*D/2,{},6);
-for(const b of[-1,1])bx(W,.08,.08,0xa9b3bb,0,3.1,b*D/2);for(const a of[-1,1])bx(.08,.08,D,0xa9b3bb,a*W/2,3.1,0);
-const water=new THREE.Mesh(new THREE.BoxGeometry(W-.08,1,D-.08),fm(0x6ec6d6,{transparent:true,opacity:.6}));tg.add(water);
-bx(W-.06,.07,D-.06,0xf4ecd8,0,TY,0);bx(W-.3,.03,D-.4,0xb08a58,0,TY+.06,0);
-for(const z of[-.55,.55])bx(W-.4,.1,.35,0xffffff,0,2.9,z,LED);
-const pl=new THREE.PointLight(0xffc4ec,.7,7);pl.position.set(0,2.7,0);tg.add(pl);
-for(const[z,c]of[[-.9,0x4cc38a],[.9,0x4a8fe0]]){cy(.03,1.4,0x333c46,1.88,TY-.5,z,{},6);add(new THREE.Mesh(new THREE.SphereGeometry(.06,6,5),fm(c)),1.88,TY+.25,z)}
-const NX=14,NZ=8,N=NX*NZ,P=[];for(let i=0;i<NX;i++)for(let j=0;j<NZ;j++)P.push({x:(i/(NX-1)-.5)*(W-.5)+(Math.random()-.5)*.05,z:(j/(NZ-1)-.5)*(D-.5)+(Math.random()-.5)*.05,d:Math.random()*.25,s:.8+Math.random()*.4,r:Math.random()*6.28});
-const mk=(geo,n,cs)=>{const m=new THREE.InstancedMesh(geo,fm(0xffffff),n);m.castShadow=cs;PA.add(m);return m};
-const sg=new THREE.CylinderGeometry(.014,.02,1,5);sg.translate(0,.5,0);const rg=new THREE.CylinderGeometry(.007,.003,1,4);rg.translate(0,-.5,0);
-const stems=mk(sg,N,true),leaves=mk(new THREE.IcosahedronGeometry(.075,1),N*2,true),roots=mk(rg,N,false),bub=mk(new THREE.IcosahedronGeometry(.04,0),12,false);bub.material.transparent=true;bub.material.opacity=.6;
-PA=sc;
-// センサケーブル（プローブ→制御盤）
-for(const z of[-.9,.9]){const s=new THREE.Vector3(.6+1.88,TY+.3,.8+z);const cu=new THREE.CatmullRomCurve3([s,new THREE.Vector3(s.x,3.3,s.z),new THREE.Vector3(-1,3.5,-.3),new THREE.Vector3(-4,3.3,.6),new THREE.Vector3(-4.15,2.2,.6+z*.15)]);sc.add(new THREE.Mesh(new THREE.TubeGeometry(cu,30,.022,4),fm(0x2b3138)))}
-const cH=new THREE.Color(0x6fd06a),cD=new THREE.Color(0x9a7a44),r1=new THREE.Color(0xf6f2e6),r2=new THREE.Color(0x7d5632);
-const SYC={ec:[0xc6dc5a,0xb3873a],ph:[0xb98fc8,0xeceaa6],wt:[0xa9bf6a,0x9bc0a0]};for(const k in SYC)SYC[k]=SYC[k].map(c=>new THREE.Color(c));
-let wDisp=2,dirty=1,stg=0,popT=-9,lastScr=-9;
-function vis(tt){const f=F(),cur={ec:ECv(),ph:S.ph,wt:S.water},st=1-Math.min(f.ec,f.ph,f.wt);
-let wk='ec',ws=0;for(const k in f){const s=1-f[k];if(s>ws){ws=s;wk=k}}
-const rg2=C[wk],side=cur[wk]<(rg2[1]+rg2[2])/2?0:1,sick=Math.min(1,1-S.hp/100+st*.4),wilt=wk=='wt'&&side==0?ws:0,small=wk=='ec'&&side==1?ws*.35:0;
-const ns=Math.floor(S.g*4);if(ns!==stg){stg=ns;popT=tt}const pa=tt-popT,pop=pa<.6?1+.22*Math.sin(pa*16)*Math.exp(-pa*5):1;
-wDisp+=(S.water-wDisp)*.15;const h=wDisp/CAP*HM;water.scale.y=h;water.position.y=WB+h/2;
-for(let i=0;i<N;i++){const p=P[i],gg=Math.max(0,Math.min(1,(S.g-p.d)/(1-p.d))),hg=(.02+gg*.55*p.s)*pop,sw=Math.sin(tt*1.6+p.r)*.04*(.3+gg);
-du.position.set(p.x,TY+.08,p.z);du.rotation.set(0,0,sw);du.scale.set(1,hg,1);du.updateMatrix();stems.setMatrixAt(i,du.matrix);
-tc.copy(cH).lerp(SYC[wk][side],Math.min(1,ws*1.3)).lerp(cD,Math.max(0,(1-S.hp/100)*.9)).offsetHSL(0,0,(p.s-1)*.08);stems.setColorAt(i,tc);
-for(let k=0;k<2;k++){const a=p.r+k*Math.PI,sz=(.25+gg*1.3)*(1-small)*pop;
-du.position.set(p.x+Math.cos(a)*.06*sz+sw*hg,TY+.08+hg,p.z+Math.sin(a)*.06*sz);du.rotation.set(0,-a,(k?1:-1)*(sick*.6+wilt*.9));du.scale.set(sz,sz*.28,sz*.85);du.updateMatrix();leaves.setMatrixAt(i*2+k,du.matrix);leaves.setColorAt(i*2+k,tc)}
-du.position.set(p.x,TY,p.z);du.rotation.set(0,0,Math.sin(tt*1.2+p.r)*.05);du.scale.set(1,.05+gg*.9,1);du.updateMatrix();roots.setMatrixAt(i,du.matrix);
-tc.copy(r1).lerp(r2,Math.min(1,st*1.3));roots.setColorAt(i,tc)}
-for(let j=0;j<12;j++){du.position.set(-1.7+Math.sin(tt*3+j)*.04,WB+((tt*.5+j/12)%1)*h,.8);du.rotation.set(0,0,0);du.scale.setScalar(.6+(j%3)*.3);du.updateMatrix();bub.setMatrixAt(j,du.matrix)}
-for(const m of[stems,leaves,roots]){m.instanceMatrix.needsUpdate=true;m.instanceColor.needsUpdate=true}bub.instanceMatrix.needsUpdate=true;
-LP.forEach((m,i)=>{const q=[f.ec,f.ph,f.wt][i];m.material.color.setHex(q>.9?0x5fe09a:q>.5?0xf2c230:0xff6b6b);m.material.emissive.copy(m.material.color)});
-pLed.material.emissiveIntensity=.5+.5*Math.sin(tt*4);if(tt-lastScr>.4){lastScr=tt;drawScr(f)}}
-// カメラ（ドラッグ回転・ホイールでズーム）
-// プリセット：[方位, 仰角, 距離, 注視点の高さ, 収める点]。距離は「点がパネルに隠れない領域（SF）に収まる距離」と比べて大きい方を使う
-const bc=([a,b])=>[...Array(8)].map((_,i)=>[i&1?b[0]:a[0],i&2?b[1]:a[1],i&4?b[2]:a[2]]);
-const RM=[...bc([[-4.7,-1.26,-3.7],[4.7,0,3.7]]),[-4.7,4.72,-3.7],[4.7,4.72,-3.7],[-4.7,4.72,3.7]],TK=bc([[-1.6,0,-.5],[2.8,3.2,2.1]]),TR=bc([[-1.25,1.8,-.2],[2.45,2.5,1.8]]),MO=bc([[-1.3,1.95,-3.45],[1.3,3.45,-3.3]]);
-const PR={全景:[.6,1.12,12.5,1.6,RM],断面:[0,1.45,9.5,1.5,TK],寄り:[.35,1.05,5.6,1.9,TR],モニタ:[0,1.4,6.2,2.7,MO]};
-const app=document.getElementById('app'),MQ=matchMedia('(max-width:720px),(max-height:500px)'),V=new THREE.Vector3();let ck,rf,go,cu,SF,VS;
-function place(t,p,r,y){cam.position.set(Math.sin(t)*Math.sin(p)*r,y+Math.cos(p)*r,Math.cos(t)*Math.sin(p)*r);cam.lookAt(0,y,0)}
-// 戻り値：[距離, 投影のずらし x, y]（点の外接矩形の中心を SF の中心に合わせる）
-function fitR(k){const[t,p,r0,y,pts]=PR[k],[W,H]=VS;let B;cam.clearViewOffset();
-const ok=r=>{place(t,p,r,y);cam.updateMatrixWorld();B=[1e9,1e9,-1e9,-1e9];for(const q of pts){V.set(...q).project(cam);if(V.z>1)return 0;const x=(V.x+1)/2*W,z=(1-V.y)/2*H;B=[Math.min(B[0],x),Math.min(B[1],z),Math.max(B[2],x),Math.max(B[3],z)]}return B[2]-B[0]<=SF[2]-SF[0]&&B[3]-B[1]<=SF[3]-SF[1]};
-let r=r0;if(!ok(r0)){let lo=r0,hi=150;for(let i=0;i<24;i++){const m=(lo+hi)/2;ok(m)?hi=m:lo=m}ok(r=hi)}return[r,(B[0]+B[2]-SF[0]-SF[2])/2,(B[1]+B[3]-SF[1]-SF[3])/2]}
-function camTo(k){const[r,ox,oy]=fitR(k);ck=k;rf=r;go=[PR[k][0],PR[k][1],r,PR[k][3],ox,oy]}
-function setCam(){cu=cu.map((v,i)=>v+(go[i]-v)*.12);place(...cu);cam.setViewOffset(VS[0],VS[1],cu[4],cu[5],VS[0],VS[1])}
-let dr=null;cv.addEventListener('pointerdown',e=>{dr=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId)});cv.addEventListener('pointerup',()=>dr=null);
-cv.addEventListener('pointermove',e=>{if(!dr)return;go[0]-=(e.clientX-dr[0])*.006;go[1]=Math.max(.5,Math.min(1.65,go[1]-(e.clientY-dr[1])*.006));dr=[e.clientX,e.clientY]});
-cv.addEventListener('wheel',e=>{e.preventDefault();go[2]=Math.max(3,Math.min(Math.max(20,rf*1.6),go[2]+e.deltaY*.005*Math.max(1,rf/12)))},{passive:false});
-// 画面サイズ・パネル位置から空き領域 SF（HUD・道具バーに隠れない範囲）を決め、今のカメラを合わせ直す
-function rs(){const w=app.clientWidth,h=app.clientHeight,hb=document.getElementById('hud').getBoundingClientRect(),bt=document.getElementById('bar').getBoundingClientRect().top,sd=document.getElementById('side').style;
-R.setSize(w,h,false);cam.aspect=w/h;VS=[w,h];if(MQ.matches){sd.top=hb.bottom+8+'px';sd.maxHeight=bt-hb.bottom-16+'px'}else sd.top=sd.maxHeight='';
-SF=[10,MQ.matches?hb.bottom+8:10,w-10,bt-8];
-if(ck){const[r,ox,oy]=fitR(ck);go[2]*=r/rf;cu[2]*=r/rf;rf=r;go[4]=cu[4]=ox;go[5]=cu[5]=oy}}addEventListener('resize',rs);
-// ===== HUD =====
-const GS=[['ec','EC (mS/cm)',0,3,()=>ECv(),2],['ph','pH',4,8,()=>S.ph,2],['wt','液量 (L)',0,3,()=>S.water,2]];
-const gs=document.getElementById('gs');gs.innerHTML=GS.map(([k,l])=>`<div class="row"><b>${l}</b><span id="v${k}"></span><div class="tr" id="t${k}"><div class="mk" id="m${k}"></div></div></div>`).join('');
-for(const[k,,lo,hi]of GS){const r=C[k],p=x=>((x-lo)/(hi-lo)*100).toFixed(1);
-document.getElementById('t'+k).style.background=`linear-gradient(90deg,#d6454588 0 ${p(r[0])}%,#e0a10088 ${p(r[0])}% ${p(r[1])}%,#2f9e5b ${p(r[1])}% ${p(r[2])}%,#e0a10088 ${p(r[2])}% ${p(r[3])}%,#d6454588 ${p(r[3])}%)`}
-function hud(){for(const[k,,lo,hi,fn,]of GS){const v=fn();document.getElementById('v'+k).textContent=v.toFixed(2);document.getElementById('m'+k).style.left=Math.max(0,Math.min(100,(v-lo)/(hi-lo)*100))+'%'}
-const dy=Math.floor(S.h/24)+1;document.getElementById('day').textContent=`Day ${dy} / ${C.days}`+(dy>C.days?'（超過）':'');
-document.getElementById('gb').style.width=S.g*100+'%';document.getElementById('hb').style.width=Math.max(0,S.hp)+'%';
-const lg=S.log[0],key=lg?lg.h+lg.t:'';if(hud.lk!==key){hud.lk=key;if(lg?.k=='o'&&!app.classList.contains('so'))mb.classList.add('nw');document.getElementById('log').innerHTML='<h3>📖 栽培日誌</h3><div id="jl">'+S.log.map(e=>`<div class="jn ${e.k}"><small style="margin:0">Day ${Math.floor(e.h/24)+1} ${String(e.h%24).padStart(2,'0')}:00</small>${{o:'🔍',d:'📝'}[e.k]||'✏️'} ${e.t}</div>`).join('')+'</div>'};
-const c=document.getElementById('ch'),x=c.getContext('2d'),w=c.width,h=c.height;x.clearRect(0,0,w,h);x.strokeStyle='rgba(128,128,128,.35)';x.strokeRect(0,0,w,h);
-const ln=(i,lo,hi,col)=>{x.strokeStyle=col;x.lineWidth=1.5;x.beginPath();S.hist.forEach((q,j)=>{const X=j/(C.days*12)*w,Y=h-(q[i]-lo)/(hi-lo)*h;j?x.lineTo(X,Y):x.moveTo(X,Y)});x.stroke()};ln(0,0,3,'#2f9e5b');ln(1,4,8,'#3b82d6')}
-let speed=4;const spb=document.getElementById('sp');
-[['⏸',0],['×1',1],['×4',4],['×16',16]].forEach(([l,v])=>{const b=document.createElement('button');b.textContent=l;b.onclick=()=>{speed=v;[...spb.children].forEach(c=>c.classList.toggle('on',c===b))};if(v==4)b.className='on';spb.appendChild(b)});
-const cmb=document.getElementById('cm');for(const k in PR){const b=document.createElement('button');b.textContent=k;b.onclick=()=>camTo(k);cmb.appendChild(b)}
-document.getElementById('cn').textContent=C.name;const mb=document.getElementById('mb');mb.onclick=()=>{const o=app.classList.toggle('so');mb.setAttribute('aria-expanded',o);mb.classList.remove('nw')};
-document.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{act(b.dataset.a);b.classList.remove('tap');void b.offsetWidth;b.classList.add('tap')});addEventListener('keydown',e=>{const b=document.querySelector('[data-k="'+e.key+'"]');if(b)b.click()});
-function showRes(){const d=S.done,r=document.getElementById('res');
-const t=d.k=='ok'?['収穫できました','等級 '+d.g+'（品質 '+(d.q*100).toFixed(0)+'%）']:d.k=='dead'?['枯死しました','健康度が0になりました。']:['収穫に至りませんでした','成長が遅れすぎました。'];
-document.getElementById('rb').innerHTML=`<h2>${t[0]}</h2><div>${t[1]}</div><table><tr><td>収量</td><td>${d.y.toFixed(0)} g</td></tr><tr><td>売上</td><td>¥${d.sales.toFixed(0)}</td></tr><tr><td>資材費</td><td>¥${S.cost}</td></tr><tr><td><b>利益</b></td><td><b>¥${d.profit.toFixed(0)}</b></td></tr></table><button id="rs" style="width:100%">もう一度育てる</button>`;
-r.style.display='flex';document.getElementById('rs').onclick=()=>{r.style.display='none';init();dirty=1}}
-// ===== メインループ =====
-init();hud();rs();camTo('全景');cu=[...go];document.fonts?.ready.then(rs);let last=performance.now(),acc=0,vt=0;
-function loop(t){const dt=Math.min(.25,(t-last)/1000);last=t;
-if(!S.done&&speed){acc+=dt*speed;while(acc>=1&&!S.done){acc--;tick();dirty=1}}
-vt+=dt;vis(t/1000);if(dirty||vt>.1){hud();dirty=0;vt=0}
-setCam();R.render(sc,cam);requestAnimationFrame(loop)}
-requestAnimationFrame(loop);
-</script></body></html>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

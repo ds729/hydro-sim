@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const OUT = process.argv[2]; mkdirSync(OUT, { recursive: true });
-const URL_ = process.env.URL || 'http://127.0.0.1:8123/index.html';
+const URL_ = process.env.URL || 'http://127.0.0.1:8123/hydro-sim/';
 const PORT = 9333;
 const chrome = spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
   '--headless=new', `--remote-debugging-port=${PORT}`, '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
@@ -35,7 +35,7 @@ for (const [w, h, dpr, mobile] of sizes) {
   await send('Page.navigate', { url: URL_ }); await sleep(2500);
   if (setup) logs.push('setup: ' + JSON.stringify(await ev(setup)));
   for (const c of cams) {
-    await ev(`camTo('${c}');cu=[...go];1`); await sleep(700);
+    await ev(`hydro.camera('${c}');1`); await sleep(700);
     const s = await send('Page.captureScreenshot', { format: 'png' });
     writeFileSync(join(OUT, `${w}x${h}_${c}.png`), Buffer.from(s.result.data, 'base64'));
   }

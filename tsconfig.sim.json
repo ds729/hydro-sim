@@ -1,0 +1,10 @@
+{
+  // sim 層が DOM・three.js に依存していないことを型検査で確かめる（lib に DOM を入れない）
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": []
+  },
+  "include": ["src/sim", "src/data"],
+  "exclude": ["src/**/*.test.ts"]
+}
