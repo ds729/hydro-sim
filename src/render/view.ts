@@ -5,9 +5,8 @@ import { mulberry32, type SimState } from '../sim';
 import { CameraRig, type Rect } from './camera';
 import { Diorama } from './diorama';
 
-// v0.4.1（three r128）と同じ色の出方にそろえる：色管理なし・リニア出力。
-// sRGB 出力・トーンマッピングは Phase 2（見た目強化）で入れる
-THREE.ColorManagement.enabled = false;
+// 色管理は three の既定（有効）：16進の色は sRGB として読み、リニアで光を計算して sRGB で出力する。
+// トーンマッピングは Neutral（Khronos PBR Neutral）。ACES より指定した色の色相・彩度を崩しにくく、パレットで色を決める画調に合う
 
 export class View {
   readonly renderer: THREE.WebGLRenderer;
@@ -16,10 +15,11 @@ export class View {
 
   constructor(canvas: HTMLCanvasElement, seed = 1) {
     const r = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }));
-    r.outputColorSpace = THREE.LinearSRGBColorSpace;
+    r.outputColorSpace = THREE.SRGBColorSpace;
+    r.toneMapping = THREE.NeutralToneMapping;
     r.setPixelRatio(Math.min(devicePixelRatio, 2));
     r.shadowMap.enabled = true;
-    // PCFSoftShadowMap は three r18x で廃止され PCFShadowMap に統合された
+    // PCFSoftShadowMap は three r18x で廃止され PCFShadowMap に統合された（ぼかしは shadow.radius で付ける）
     r.shadowMap.type = THREE.PCFShadowMap;
     // 苗の配置などの見た目の乱数。sim の乱数とは別に固定シードで作る（スクリーンショットを再現できるように）
     this.diorama = new Diorama(mulberry32(seed));

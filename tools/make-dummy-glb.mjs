@@ -6,8 +6,9 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 const OUT = 'public/models/dummy-crate.glb';
 // 木箱：幅 0.7 × 高さ 0.4 × 奥行き 0.5 m。原点は接地面の中心、Y-up
 const [W, H, D] = [0.7, 0.4, 0.5];
-// 色は手続き生成の木箱（0xd9a05b）と同じ。色管理を切っている間（v0.5）は 0〜255 をそのまま 0〜1 にした値で同じ見た目になる
-const COLOR = [0xd9, 0xa0, 0x5b].map(v => v / 255);
+// 色は手続き生成の木箱（0xb38e68、sRGB）と同じ。glTF の baseColorFactor はリニアなので sRGB → リニアに変換して入れる
+const linear = c => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+const COLOR = [0xb3, 0x8e, 0x68].map(v => linear(v / 255));
 
 // 面ごとに頂点を分けて法線を持たせる（フラットシェーディング）
 const pos = [], nrm = [], idx = [];

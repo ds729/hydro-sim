@@ -103,6 +103,8 @@ Object.assign(window, {
     camera(name: PresetName, instant = true) { view.rig.goTo(name, instant); },
     toggleMenu() { menu.click(); },
     renderInfo() { return { ...view.renderer.info.render }; },
+    /** 描画の調整用（露出・ライトの強度などをコンソールから試す） */
+    view,
     /** .glb の読み込み状態（'ok' / 'error: <URL>'） */
     models: modelStatus,
   },

@@ -16,6 +16,8 @@ export class Monitor {
     c.height = H;
     this.ctx = c.getContext('2d')!;
     this.texture = new THREE.CanvasTexture(c);
+    // Canvas の色は sRGB（指定しないとリニアとして扱われ、白っぽく出る）
+    this.texture.colorSpace = THREE.SRGBColorSpace;
   }
 
   draw(s: SimState, d: Diagnosis): void {

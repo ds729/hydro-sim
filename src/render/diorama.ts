@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { bedOf, diagnose, type Factor, type SimState } from '../sim';
-import { Builder, LED, mat } from './build';
+import { bakedShadow, Builder, LED, mat } from './build';
 import { loadModel } from './models';
 import { Monitor } from './monitor';
 
@@ -45,18 +45,31 @@ export class Diorama {
 
   constructor(private rand: () => number) {
     const sc = this.scene;
-    sc.add(new THREE.HemisphereLight(0xfff4e6, 0xa9b8d8, 0.8 * Math.PI));
-    const sun = new THREE.DirectionalLight(0xffefd6, 0.95 * Math.PI);
+    // 光の強度は物理単位（π で旧来の 1 に相当）。上向きの面がほぼ指定色になり、影の側は 6 割ほどの明るさに残る（影は薄く）
+    sc.add(new THREE.HemisphereLight(0xfff6ea, 0xb4bccf, 2.3));
+    const sun = new THREE.DirectionalLight(0xfff0dc, 1.7);
     sun.position.set(6, 9, 5);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(sun.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 1, far: 30 });
+    // 解像度を下げてぼかす（柔らかい影。スマホでも安い）
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.radius = 4;
+    sun.shadow.normalBias = 0.02;
+    Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 1, far: 30 });
     sc.add(sun);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.ShadowMaterial({ opacity: 0.16 }));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -1.26;
-    ground.receiveShadow = true;
-    sc.add(ground);
+    // 台座の下の落ち影（背景に落ちる）。光の向きの反対側へ少しずらす
+    const drop = bakedShadow(14, 12, [[-0.6, -0.4, 9.4, 7.4, 0.36]], 1.8, 6);
+    drop.position.y = -1.26;
+    sc.add(drop);
+    // 床の接地影：壁際と機器の足元を暗くする（AO の代わり）。矩形は各部品の床の上の外形
+    const ao = bakedShadow(9.4, 7.4, [
+      [0, -3.55, 9.4, 0.34, 0.3], [-4.55, 0, 0.34, 7.4, 0.3],
+      [-2.4, -2.8, 2.3, 0.95, 0.22], [3.2, -2.8, 2.3, 0.95, 0.22],
+      [-4.15, 0.6, 0.5, 1.3, 0.38], [0.6, 0.8, W + 0.3, D + 0.3, 0.42],
+      [3.7, 1.0, 0.9, 0.9, 0.38], [3.1, 0.2, 0.4, 0.35, 0.3],
+      [-3.2, 2.6, 0.7, 0.5, 0.38], [-2.4, 2.7, 0.7, 0.5, 0.38],
+    ], 0.45, 24);
+    ao.position.y = 0.02;
+    sc.add(ao);
     this.buildRoom(new Builder(sc));
     this.buildRacks(new Builder(sc));
     this.buildEquipment(new Builder(sc));
@@ -65,8 +78,8 @@ export class Diorama {
   }
 
   private buildRoom(b: Builder) {
-    b.box(9.4, 0.36, 7.4, 0xdcd8d0, 0, -0.18, 0);
-    b.box(9.4, 0.9, 7.4, 0x8f7f70, 0, -0.81, 0);
+    b.box(9.4, 0.36, 7.4, 0xcfc6b8, 0, -0.18, 0);
+    b.box(9.4, 0.9, 7.4, 0xa57b63, 0, -0.81, 0);
     b.box(9.4, 4.6, 0.3, 0xcfe1d4, 0, 2.3, -3.55);
     b.box(0.3, 4.6, 7.4, 0xc6dccf, -4.55, 2.3, 0);
     b.box(9.4, 0.4, 0.34, 0x9fb8aa, 0, 0.2, -3.55);
@@ -74,7 +87,7 @@ export class Diorama {
     b.box(9.4, 0.12, 0.42, 0xeee9df, 0, 4.66, -3.55);
     b.box(0.42, 0.12, 7.4, 0xeee9df, -4.55, 4.66, 0);
     for (let i = 0; i < 8; i++) b.box(0.08, 4.2, 0.06, 0xb7cfc0, -4 + i * 1.15, 2.4, -3.38);
-    b.cyl(0.07, 9, 0x9aa5ad, 0, 4.1, -3.3).rotation.z = Math.PI / 2;
+    b.cyl(0.07, 9, 0xa9b3bb, 0, 4.1, -3.3).rotation.z = Math.PI / 2;
     // 床の黄色い区画線
     for (const [x, z, w, d] of [[0.6, -0.7, 4.8, 0.08], [0.6, 2.3, 4.8, 0.08], [-1.8, 0.8, 0.08, 3], [3, 0.8, 0.08, 3]]) {
       b.box(w, 0.012, d, 0xf2c230, x, 0.006, z);
@@ -100,7 +113,7 @@ export class Diorama {
       du.rotation.set(0, i, 0);
       du.updateMatrix();
       m.setMatrixAt(i, du.matrix);
-      m.setColorAt(i, this.color.setHSL(0.27 + r() * 0.06, 0.5, 0.42 + r() * 0.12));
+      m.setColorAt(i, this.color.setHSL(0.27 + r() * 0.06, 0.45, 0.42 + r() * 0.12, THREE.SRGBColorSpace));
     });
     m.castShadow = true;
     b.parent.add(m);
@@ -119,19 +132,19 @@ export class Diorama {
       return m;
     });
     b.box(2.6, 1.5, 0.12, 0x2d3640, 0, 2.7, -3.38);
-    const screen = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.3), new THREE.MeshBasicMaterial({ map: this.monitor.texture }));
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.3), new THREE.MeshBasicMaterial({ map: this.monitor.texture, toneMapped: false }));
     screen.position.set(0, 2.7, -3.31);
     sc.add(screen);
-    b.cyl(0.45, 1.1, 0x4c88c7, 3.7, 0.55, 1.0, {}, 10);
-    b.cyl(0.47, 0.08, 0x2f5f95, 3.7, 1.14, 1.0, {}, 10);
-    b.cyl(0.06, 1, 0x9aa5ad, 3.1, 0.5, 1.0).rotation.z = Math.PI / 2;
+    b.cyl(0.45, 1.1, 0x6f9cc4, 3.7, 0.55, 1.0, {}, 10);
+    b.cyl(0.47, 0.08, 0x4a7398, 3.7, 1.14, 1.0, {}, 10);
+    b.cyl(0.06, 1, 0xa9b3bb, 3.1, 0.5, 1.0).rotation.z = Math.PI / 2;
     b.box(0.4, 0.3, 0.35, 0x3d4a55, 3.1, 0.15, 0.2);
-    b.cyl(0.05, 0.9, 0x9aa5ad, 3.4, 0.3, 0.6).rotation.x = Math.PI / 2;
+    b.cyl(0.05, 0.9, 0xa9b3bb, 3.4, 0.3, 0.6).rotation.x = Math.PI / 2;
     this.pumpLed = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 5), mat(0x5fe09a, { emissive: 0x5fe09a }));
     this.pumpLed.position.set(3.1, 0.34, 0.2);
     sc.add(this.pumpLed);
-    b.box(0.7, 0.4, 0.5, 0xd9a05b, -3.2, 0.2, 2.6);
-    b.box(0.7, 0.4, 0.5, 0xc88c47, -3.2, 0.6, 2.6);
+    b.box(0.7, 0.4, 0.5, 0xb38e68, -3.2, 0.2, 2.6);
+    b.box(0.7, 0.4, 0.5, 0xa27a55, -3.2, 0.6, 2.6);
     // 木箱の1つは .glb（v0.5 のダミー。読み込みとパスの確認用で、Phase 2 で本物のモデルに置き換える）
     loadModel('dummy-crate').then(m => {
       m.position.set(-2.4, 0, 2.7);
@@ -144,20 +157,20 @@ export class Diorama {
     const tg = new THREE.Group(), b = new Builder(tg), r = this.rand;
     tg.position.set(0.6, 0, 0.8);
     this.scene.add(tg);
-    b.box(W + 0.3, 0.23, D + 0.3, 0x6f7f8c, 0, 0.115, 0);
+    b.box(W + 0.3, 0.23, D + 0.3, 0x7f8894, 0, 0.115, 0);
     const glass = new THREE.Mesh(new THREE.BoxGeometry(W, 2.1, D), mat(0xcdeeff, { transparent: true, opacity: 0.14, depthWrite: false }));
     glass.position.y = WB + 1.05;
     tg.add(glass);
     for (const i of [-1, 1]) for (const j of [-1, 1]) b.cyl(0.05, 3.1, 0xa9b3bb, (i * W) / 2, 1.55, (j * D) / 2, {}, 6);
     for (const j of [-1, 1]) b.box(W, 0.08, 0.08, 0xa9b3bb, 0, 3.1, (j * D) / 2);
     for (const i of [-1, 1]) b.box(0.08, 0.08, D, 0xa9b3bb, (i * W) / 2, 3.1, 0);
-    this.water = new THREE.Mesh(new THREE.BoxGeometry(W - 0.08, 1, D - 0.08), mat(0x6ec6d6, { transparent: true, opacity: 0.6 }));
+    this.water = new THREE.Mesh(new THREE.BoxGeometry(W - 0.08, 1, D - 0.08), mat(0x5cc0c8, { transparent: true, opacity: 0.6 }));
     tg.add(this.water);
     b.box(W - 0.06, 0.07, D - 0.06, 0xf4ecd8, 0, TY, 0);
-    b.box(W - 0.3, 0.03, D - 0.4, 0xb08a58, 0, TY + 0.06, 0);
+    b.box(W - 0.3, 0.03, D - 0.4, 0x857b6e, 0, TY + 0.06, 0);
     for (const z of [-0.55, 0.55]) b.box(W - 0.4, 0.1, 0.35, 0xffffff, 0, 2.9, z, LED);
-    // r128 の既定（decay 1・距離で直線的に減衰）に近づける。見た目は Phase 2 で再調整
-    const pl = new THREE.PointLight(0xffc4ec, 0.7 * Math.PI, 7, 1);
+    // LED の照り返し（トレイと苗をほんのり桃色に）。decay 1 で距離に対して緩やかに減衰させる
+    const pl = new THREE.PointLight(0xffc4ec, 1.2, 7, 1);
     pl.position.set(0, 2.7, 0);
     tg.add(pl);
     // EC・pH センサのプローブ
