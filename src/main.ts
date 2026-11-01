@@ -13,6 +13,8 @@ const $ = (id: string) => document.getElementById(id)!;
 const app = $('app'), menu = $('mb');
 /** スマホ用レイアウト（style.css の @media と同じ条件） */
 const MOBILE = matchMedia('(max-width:720px),(max-height:500px)');
+/** 横向きスマホ：HUD は左の縦長、道具バーは右の縦並び（style.css と同じ条件） */
+const LAND = matchMedia('(max-height:500px) and (min-aspect-ratio:4/3)');
 
 let s: SimState = createSim();
 /** 1秒あたりに進める時間（h） */
@@ -36,12 +38,21 @@ function restart() {
 
 // 画面サイズ・パネル位置から、3D がパネルに隠れない領域を決めてカメラを合わせ直す
 function layout() {
-  const w = app.clientWidth, h = app.clientHeight, hb = $('hud').getBoundingClientRect(), bt = $('bar').getBoundingClientRect().top, sd = $('side').style;
-  if (MOBILE.matches) {
-    sd.top = hb.bottom + 8 + 'px';
-    sd.maxHeight = bt - hb.bottom - 16 + 'px';
-  } else sd.top = sd.maxHeight = '';
-  view.resize(w, h, [10, MOBILE.matches ? hb.bottom + 8 : 10, w - 10, bt - 8]);
+  const w = app.clientWidth, h = app.clientHeight, hb = $('hud').getBoundingClientRect(), bb = $('bar').getBoundingClientRect();
+  const sd = $('side').style;
+  if (LAND.matches) {
+    // ☰ の中身は HUD と道具バーの間に開く
+    Object.assign(sd, { left: hb.right + 8 + 'px', right: w - bb.left + 8 + 'px', top: '8px', maxHeight: h - 16 + 'px' });
+    view.resize(w, h, [[hb.right + 8, 8, bb.left - 8, h - 8]]);
+  } else if (MOBILE.matches) {
+    Object.assign(sd, { left: '', right: '', top: hb.bottom + 8 + 'px', maxHeight: bb.top - hb.bottom - 16 + 'px' });
+    view.resize(w, h, [[10, hb.bottom + 8, w - 10, bb.top - 8]]);
+  } else {
+    Object.assign(sd, { left: '', right: '', top: '', maxHeight: '' });
+    // PC：左右のパネルの間（縦長）と、パネルの下（横長）の2候補。縦長の画面（タブレット縦など）では下が広くなる
+    const sb = $('side').getBoundingClientRect();
+    view.resize(w, h, [[hb.right + 10, 10, sb.left - 10, bb.top - 8], [10, Math.max(hb.bottom, sb.bottom) + 8, w - 10, bb.top - 8]]);
+  }
 }
 
 // 時間・カメラ・メニュー
@@ -74,6 +85,9 @@ layout();
 view.rig.goTo('全景', true);
 addEventListener('resize', layout);
 document.fonts?.ready.then(layout);
+// 日誌が伸びる・☰ を開くなどでパネルの大きさが変わったときも合わせ直す
+const ro = new ResizeObserver(() => layout());
+for (const id of ['hud', 'side', 'bar']) ro.observe($(id));
 
 let last = performance.now(), acc = 0, sinceHud = 0;
 function loop(now: number) {

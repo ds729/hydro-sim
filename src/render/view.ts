@@ -26,9 +26,10 @@ export class View {
     this.rig.attach(canvas);
   }
 
-  resize(w: number, h: number, safe: Rect): void {
+  /** safes：3D がパネルに隠れない領域の候補（カメラは被写体が大きく映る方を使う） */
+  resize(w: number, h: number, safes: Rect[]): void {
     this.renderer.setSize(w, h, false);
-    this.rig.setViewport(w, h, safe);
+    this.rig.setViewport(w, h, safes);
   }
 
   /** 状態を反映して1フレーム描く。t は秒 */

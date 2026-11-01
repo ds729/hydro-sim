@@ -13,6 +13,8 @@ const PORT = 9333;
 const chrome = spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
   '--headless=new', `--remote-debugging-port=${PORT}`, '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
   `--user-data-dir=${mkdtempSync(join(tmpdir(), 'cdp-'))}`, '--no-first-run', 'about:blank'], { stdio: 'ignore' });
+// timeout などで止められても Chrome を残さない（残るとポート 9333 がふさがり、次の実行が ws.onopen で落ちる）
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { chrome.kill(); process.exit(1); });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let ws;
 for (let i = 0; i < 50; i++) {
@@ -31,7 +33,7 @@ await send('Runtime.enable'); await send('Page.enable');
 if (process.env.SCHEME) await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: process.env.SCHEME }] });
 
 const sizes = JSON.parse(process.argv[3] || '[[1280,800,1,false],[390,844,3,true]]');
-const cams = JSON.parse(process.argv[4] || '["全景","断面","寄り","モニタ"]');
+const cams = JSON.parse(process.argv[4] || '["全景","平面","断面","寄り","モニタ"]');
 const setup = process.argv[5] || '';
 for (const [w, h, dpr, mobile] of sizes) {
   await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: dpr, mobile });

@@ -87,7 +87,7 @@ export class Diorama {
     b.box(9.4, 0.12, 0.42, 0xeee9df, 0, 4.66, -3.55);
     b.box(0.42, 0.12, 7.4, 0xeee9df, -4.55, 4.66, 0);
     for (let i = 0; i < 8; i++) b.box(0.08, 4.2, 0.06, 0xb7cfc0, -4 + i * 1.15, 2.4, -3.38);
-    b.cyl(0.07, 9, 0xa9b3bb, 0, 4.1, -3.3).rotation.z = Math.PI / 2;
+    b.cyl(0.07, 9, 0xa9b3bb, 0, 4.5, -3.3).rotation.z = Math.PI / 2;
     // 床の黄色い区画線
     for (const [x, z, w, d] of [[0.6, -0.7, 4.8, 0.08], [0.6, 2.3, 4.8, 0.08], [-1.8, 0.8, 0.08, 3], [3, 0.8, 0.08, 3]]) {
       b.box(w, 0.012, d, 0xf2c230, x, 0.006, z);
@@ -131,9 +131,10 @@ export class Diorama {
       sc.add(m);
       return m;
     });
-    b.box(2.6, 1.5, 0.12, 0x2d3640, 0, 2.7, -3.38);
-    const screen = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.3), new THREE.MeshBasicMaterial({ map: this.monitor.texture, toneMapped: false }));
-    screen.position.set(0, 2.7, -3.31);
+    // モニタは高めに掛ける（断面・全景で栽培槽の枠と LED バーに隠れないように）
+    b.box(2.4, 1.4, 0.12, 0x2d3640, 0, 3.7, -3.38);
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.2), new THREE.MeshBasicMaterial({ map: this.monitor.texture, toneMapped: false }));
+    screen.position.set(0, 3.7, -3.31);
     sc.add(screen);
     b.cyl(0.45, 1.1, 0x6f9cc4, 3.7, 0.55, 1.0, {}, 10);
     b.cyl(0.47, 0.08, 0x4a7398, 3.7, 1.14, 1.0, {}, 10);
@@ -161,17 +162,18 @@ export class Diorama {
     const glass = new THREE.Mesh(new THREE.BoxGeometry(W, 2.1, D), mat(0xcdeeff, { transparent: true, opacity: 0.14, depthWrite: false }));
     glass.position.y = WB + 1.05;
     tg.add(glass);
-    for (const i of [-1, 1]) for (const j of [-1, 1]) b.cyl(0.05, 3.1, 0xa9b3bb, (i * W) / 2, 1.55, (j * D) / 2, {}, 6);
-    for (const j of [-1, 1]) b.box(W, 0.08, 0.08, 0xa9b3bb, 0, 3.1, (j * D) / 2);
-    for (const i of [-1, 1]) b.box(0.08, 0.08, D, 0xa9b3bb, (i * W) / 2, 3.1, 0);
+    for (const i of [-1, 1]) for (const j of [-1, 1]) b.cyl(0.05, 3.0, 0xa9b3bb, (i * W) / 2, 1.5, (j * D) / 2, {}, 6);
+    for (const j of [-1, 1]) b.box(W, 0.08, 0.08, 0xa9b3bb, 0, 3.0, (j * D) / 2);
+    for (const i of [-1, 1]) b.box(0.08, 0.08, D, 0xa9b3bb, (i * W) / 2, 3.0, 0);
     this.water = new THREE.Mesh(new THREE.BoxGeometry(W - 0.08, 1, D - 0.08), mat(0x5cc0c8, { transparent: true, opacity: 0.6 }));
     tg.add(this.water);
     b.box(W - 0.06, 0.07, D - 0.06, 0xf4ecd8, 0, TY, 0);
     b.box(W - 0.3, 0.03, D - 0.4, 0x857b6e, 0, TY + 0.06, 0);
-    for (const z of [-0.55, 0.55]) b.box(W - 0.4, 0.1, 0.35, 0xffffff, 0, 2.9, z, LED);
+    // LED バーは細く（寄りで苗を隠す幅を減らす）
+    for (const z of [-0.55, 0.55]) b.box(W - 0.4, 0.08, 0.14, 0xffffff, 0, 2.85, z, LED);
     // LED の照り返し（トレイと苗をほんのり桃色に）。decay 1 で距離に対して緩やかに減衰させる
     const pl = new THREE.PointLight(0xffc4ec, 1.2, 7, 1);
-    pl.position.set(0, 2.7, 0);
+    pl.position.set(0, 2.65, 0);
     tg.add(pl);
     // EC・pH センサのプローブ
     for (const [z, c] of [[-0.9, 0x4cc38a], [0.9, 0x4a8fe0]]) {
