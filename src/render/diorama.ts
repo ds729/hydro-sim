@@ -2,8 +2,8 @@
 // 苗・水位・ランプ・モニタは sim の状態から毎フレーム作り直す
 
 import * as THREE from 'three';
-import { bedOf, diagnose, type Factor, type SimState } from '../sim';
-import { bakedShadow, Builder, LED, mat } from './build';
+import { bedOf, diagnose, mulberry32, type Factor, type SimState } from '../sim';
+import { bakedShadow, Builder, LED, mat, SLAB } from './build';
 import { loadModel } from './models';
 import { Monitor } from './monitor';
 
@@ -58,7 +58,7 @@ export class Diorama {
     sc.add(sun);
     // 台座の下の落ち影（背景に落ちる）。光の向きの反対側へ少しずらす
     const drop = bakedShadow(14, 12, [[-0.6, -0.4, 9.4, 7.4, 0.36]], 1.8, 6);
-    drop.position.y = -1.26;
+    drop.position.y = -SLAB;
     sc.add(drop);
     // 床の接地影：壁際と機器の足元を暗くする（AO の代わり）。矩形は各部品の床の上の外形
     const ao = bakedShadow(9.4, 7.4, [
@@ -70,6 +70,7 @@ export class Diorama {
     ], 0.45, 24);
     ao.position.y = 0.02;
     sc.add(ao);
+    this.buildSlab(new Builder(sc));
     this.buildRoom(new Builder(sc));
     this.buildRacks(new Builder(sc));
     this.buildEquipment(new Builder(sc));
@@ -77,9 +78,73 @@ export class Diorama {
     this.buildCables();
   }
 
+  /**
+   * 台座＝床スラブの断面（参照画像の土台の地層を工場の床に置き換えたもの）。上から
+   * 床仕上げ・コンクリート・配管層（奥へ凹ませ、配管の切り口と支柱を見せる）・砕石・土（2色）。配管・支柱・石は InstancedMesh 1つずつ
+   */
+  private buildSlab(b: Builder) {
+    const SX = 9.4, SZ = 7.4;
+    /** [上端, 下端, 色, 凹み] */
+    const layers: [number, number, number, number][] = [
+      [0, -0.06, 0xcfc6b8, -0.01], [-0.06, -0.4, 0xb3adb5, 0], [-0.4, -0.8, 0x6e6a72, 0.12],
+      [-0.8, -1.0, 0xa39684, 0], [-1.0, -1.3, 0xa8735a, 0], [-1.3, -SLAB, 0x8c5e48, 0],
+    ];
+    for (const [top, bottom, color, inset] of layers) {
+      // 床の上面以外は影を落とさない（落ち影は焼き込み）
+      b.box(SX - 2 * inset, top - bottom, SZ - 2 * inset, color, 0, (top + bottom) / 2, 0).castShadow = top === 0;
+    }
+    const du = this.dummy, c = this.color;
+    // 配管層の配管：[向き, 位置（x か z）, 高さ, 半径, 色]。給水＝青・養液＝青緑・排水＝灰・電線管＝橙
+    const pipes: ['x' | 'z', number, number, number, number][] = [
+      ['z', -3.6, -0.6, 0.08, 0x5b8fc4], ['z', -2.9, -0.66, 0.05, 0xd9893f], ['z', -0.8, -0.58, 0.11, 0x9aa3a8],
+      ['z', 1.4, -0.62, 0.07, 0x4fb3b0], ['z', 3.4, -0.6, 0.09, 0x5b8fc4],
+      ['x', -2.6, -0.64, 0.09, 0x9aa3a8], ['x', -0.6, -0.58, 0.06, 0x4fb3b0], ['x', 1.2, -0.66, 0.05, 0xd9893f], ['x', 2.9, -0.6, 0.08, 0x5b8fc4],
+    ];
+    const pm = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 10), mat(0xffffff, { roughness: 0.6 }), pipes.length);
+    pipes.forEach(([axis, p, y, r, color], i) => {
+      // 切り口が台座の側面から 1cm 出るように長さを取る
+      if (axis === 'z') { du.position.set(p, y, 0); du.rotation.set(Math.PI / 2, 0, 0); du.scale.set(r, SZ + 0.02, r); }
+      else { du.position.set(0, y, p); du.rotation.set(0, 0, Math.PI / 2); du.scale.set(r, SX + 0.02, r); }
+      du.updateMatrix();
+      pm.setMatrixAt(i, du.matrix);
+      pm.setColorAt(i, c.setHex(color));
+    });
+    pm.receiveShadow = true;
+    b.parent.add(pm);
+    // 配管層の凹みに見えるスラブの支柱（配管と重ならない位置）
+    const posts: [number, number][] = [[-2.25, SZ / 2], [0.3, SZ / 2], [2.4, SZ / 2], [SX / 2, -1.6], [SX / 2, 0.3], [SX / 2, 2.1]];
+    const qm = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat(0xb3adb5), posts.length);
+    posts.forEach(([x, z], i) => {
+      const front = z === SZ / 2;
+      du.position.set(front ? x : x - 0.065, -0.6, front ? z - 0.065 : z);
+      du.rotation.set(0, 0, 0);
+      du.scale.set(front ? 0.22 : 0.13, 0.4, front ? 0.13 : 0.22);
+      du.updateMatrix();
+      qm.setMatrixAt(i, du.matrix);
+    });
+    qm.receiveShadow = true;
+    b.parent.add(qm);
+    // 砕石と土の中の石（見える2面：手前 +z と右 +x）。苗の配置の乱数を変えないよう別のシードで作る
+    const r = mulberry32(7), stones: [number, number, number, number, boolean][] = [];
+    for (const front of [true, false]) {
+      const len = front ? SX : SZ;
+      for (let k = 0; k < 70; k++) stones.push([(r() - 0.5) * len, -0.82 - r() * 0.16, 0.025 + r() * 0.03, 0x8f8a9a, front]);
+      for (let k = 0; k < 14; k++) stones.push([(r() - 0.5) * (len - 0.6), -1.08 - r() * 0.42, 0.06 + r() * 0.07, 0x8f8a9a, front]);
+    }
+    const sm = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), mat(0xffffff), stones.length);
+    stones.forEach(([u, y, s, color, front], i) => {
+      // 中心を側面に置き、半分だけ外へ出す
+      if (front) du.position.set(u, y, SZ / 2); else du.position.set(SX / 2, y, u);
+      du.rotation.set(r() * 3, r() * 3, r() * 3);
+      du.scale.set(s, s * 0.75, s);
+      du.updateMatrix();
+      sm.setMatrixAt(i, du.matrix);
+      sm.setColorAt(i, c.setHex(color).offsetHSL(0, 0, (r() - 0.5) * 0.06));
+    });
+    b.parent.add(sm);
+  }
+
   private buildRoom(b: Builder) {
-    b.box(9.4, 0.36, 7.4, 0xcfc6b8, 0, -0.18, 0);
-    b.box(9.4, 0.9, 7.4, 0xa57b63, 0, -0.81, 0);
     b.box(9.4, 4.6, 0.3, 0xcfe1d4, 0, 2.3, -3.55);
     b.box(0.3, 4.6, 7.4, 0xc6dccf, -4.55, 2.3, 0);
     b.box(9.4, 0.4, 0.34, 0x9fb8aa, 0, 0.2, -3.55);

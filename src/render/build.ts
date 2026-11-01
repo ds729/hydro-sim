@@ -5,6 +5,9 @@ import * as THREE from 'three';
 export const mat = (color: number, o: THREE.MeshStandardMaterialParameters = {}) =>
   new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.85, ...o });
 
+/** 台座（床スラブ）の厚さ m。床の上面が y=0、台座の底が y=-SLAB */
+export const SLAB = 1.6;
+
 /** LED バーの発光 */
 export const LED = { emissive: 0xffd2ec, emissiveIntensity: 0.9 };
 
