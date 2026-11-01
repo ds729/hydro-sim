@@ -1,9 +1,11 @@
 // .glb の読み込み。ファイルは public/models/ に置き、Vite の base（Pages では /hydro-sim/）を前に付けて読む
+// モデルは tools/blender/build_models.py で作る（meshopt 圧縮）
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
-const loader = new GLTFLoader();
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 
 /** 読み込みの状態（確認用。hydro.models から見る） */
 export const modelStatus: Record<string, string> = {};

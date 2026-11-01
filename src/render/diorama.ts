@@ -76,12 +76,16 @@ const SYMPTOM: Record<Factor, [THREE.Color, THREE.Color]> = {
 };
 
 interface Seedling { x: number; z: number; delay: number; size: number; phase: number }
+type Lamp = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
 
 export class Diorama {
   readonly scene = new THREE.Scene();
+  /** 主光源（リアルタイムの影を落とす。画質設定で影を切る） */
+  readonly sun: THREE.DirectionalLight;
   private monitor = new Monitor();
-  private lamps: THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>[] = [];
-  private pumpLed!: THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>;
+  /** 状態ランプとポンプの運転ランプ（.glb の読み込み後に入る） */
+  private lamps: Lamp[] = [];
+  private pumpLed?: Lamp;
   private water!: THREE.Mesh;
   private raft!: THREE.Group;
   private stems!: THREE.InstancedMesh;
@@ -102,7 +106,7 @@ export class Diorama {
     const sc = this.scene;
     // 光の強度は物理単位（π で旧来の 1 に相当）。上向きの面がほぼ指定色になり、影の側は 6 割ほどの明るさに残る（影は薄く）
     sc.add(new THREE.HemisphereLight(0xfff6ea, 0xb4bccf, 2.3));
-    const sun = new THREE.DirectionalLight(0xfff0dc, 1.7);
+    const sun = (this.sun = new THREE.DirectionalLight(0xfff0dc, 1.7));
     sun.position.set(6, 9, 5);
     sun.castShadow = true;
     // 解像度を下げてぼかす（柔らかい影。スマホでも安い）
@@ -224,28 +228,30 @@ export class Diorama {
 
   /**
    * 奥の壁沿いの補助ラック（飾り）。棚ごとに播種日をずらしたトレイを置く（生育段階が棚で違う）。
+   * ラック本体（棚・トレイ・マット・LED）は .glb（aux_rack）を2台に使い回す。
    * 苗は栽培槽と同じ形・間隔・縮尺で作り、茎と葉は InstancedMesh 1つずつ
    */
   private buildRacks(b: Builder) {
+    const racks = [[-2.4, -2.8], [3.2, -2.8]];
+    loadModel('aux_rack').then(m => racks.forEach(([x, z], i) => {
+      const o = i ? m.clone() : m;
+      o.position.set(x, 0, z);
+      this.scene.add(o);
+    }), e => console.error(e));
     // 栽培槽の苗の配置の乱数を変えないよう別のシードで作る
-    const r = mulberry32(11), plants: [number, number, number, number][] = [], boxes: BoxSpec[] = [];
+    const r = mulberry32(11), plants: [number, number, number, number][] = [];
     /** 棚の生育段階（0〜1）。棚の高さ 0.85 に収まるよう栽培槽の収穫前より手前で止める */
     const stages = [0.15, 0.35, 0.55];
-    [[-2.4, -2.8], [3.2, -2.8]].forEach(([x, z], ri) => {
-      for (const i of [-1, 1]) for (const j of [-1, 1]) b.cyl(0.04, 2.8, 0xa9b3bb, x + i * 1.1, 1.4, z + j * 0.42, {}, 6);
+    racks.forEach(([x, z], ri) => {
       for (let t = 0; t < 3; t++) {
+        // 棚の高さ（aux_rack の RACK_SHELVES と同じ）。苗の根元はマットの上面（棚 + 0.1）
         const y = 0.5 + t * 0.85, g = stages[(t + ri * 2) % 3];
-        b.box(2.0, 0.06, 0.2, 0xffffff, x, y + 0.55, z, LED);
-        // 棚板・トレイ・マット・棚札（播種日のラベル）
-        boxes.push([2.3, 0.06, 0.95, 0xe8eef2, x, y, z], [2.1, 0.05, 0.8, 0xf4ecd8, x, y + 0.055, z],
-          [1.9, 0.02, 0.6, 0x857b6e, x, y + 0.09, z], [0.16, 0.06, 0.01, 0xfdfbf5, x - 0.8, y, z + 0.48]);
         // 栽培槽と同じ約 0.27m 間隔
         for (let i = 0; i < 7; i++) for (let j = 0; j < 3; j++) {
           plants.push([x + (i - 3) * 0.27 + (r() - 0.5) * 0.05, y + 0.1, z + (j - 1) * 0.24 + (r() - 0.5) * 0.05, g * (0.85 + r() * 0.3)]);
         }
       }
     });
-    boxSet(b.parent, boxes);
     // 子葉は遠目なので面数の少ない形にする（形と大きさは栽培槽と同じ）
     const du = this.dummy, n = plants.length;
     const stems = new THREE.InstancedMesh(STEM_GEO, mat(0xffffff), n), leaves = new THREE.InstancedMesh(LEAF_GEO_LOW, mat(0xffffff), n * 2);
@@ -262,38 +268,35 @@ export class Diorama {
     }
   }
 
-  /** 制御盤・状態ランプ・モニタ・養液タンク・ポンプ・木箱 */
+  /** 制御盤・状態ランプ・モニタ・養液タンク・ポンプ・木箱。制御盤と養液タンク（ポンプ・配管込み）は .glb */
   private buildEquipment(b: Builder) {
     const sc = this.scene;
-    b.box(0.5, 2.1, 1.3, 0xe9e4da, -4.15, 1.05, 0.6);
-    b.box(0.04, 1.7, 1.0, 0xd3cdc0, -3.89, 1.05, 0.6);
-    // 状態ランプ（上から EC・pH・液量）
-    this.lamps = [1.75, 1.55, 1.35].map(y => {
-      const m = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), mat(0x5fe09a, { emissive: 0x5fe09a, emissiveIntensity: 0.9 }));
-      m.position.set(-3.86, y, 0.6);
+    // ランプは状態で色を変えるので、1つずつ自前の発光マテリアルに差し替える
+    const lamp = (m: THREE.Object3D, name: string) => {
+      const o = m.getObjectByName(name) as THREE.Mesh;
+      o.material = mat(0x5fe09a, { emissive: 0x5fe09a, emissiveIntensity: 0.9 });
+      o.castShadow = false;
+      return o as Lamp;
+    };
+    loadModel('control_panel').then(m => {
+      m.position.set(-4.15, 0, 0.6);
+      // 状態ランプ（上から EC・pH・液量）
+      this.lamps = ['lamp_ec', 'lamp_ph', 'lamp_wt'].map(n => lamp(m, n));
       sc.add(m);
-      return m;
-    });
+    }, e => console.error(e));
+    loadModel('nutrient_tank').then(m => {
+      m.position.set(3.7, 0, 1.0);
+      this.pumpLed = lamp(m, 'pump_led');
+      sc.add(m);
+    }, e => console.error(e));
     // モニタは高めに掛ける（断面・全景で栽培槽の枠と LED バーに隠れないように）
     b.box(2.4, 1.4, 0.12, 0x2d3640, 0, 3.7, -3.38);
     const screen = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.2), new THREE.MeshBasicMaterial({ map: this.monitor.texture, toneMapped: false }));
     screen.position.set(0, 3.7, -3.31);
     sc.add(screen);
-    b.cyl(0.45, 1.1, 0x6f9cc4, 3.7, 0.55, 1.0, {}, 10);
-    b.cyl(0.47, 0.08, 0x4a7398, 3.7, 1.14, 1.0, {}, 10);
-    b.cyl(0.06, 1, 0xa9b3bb, 3.1, 0.5, 1.0).rotation.z = Math.PI / 2;
-    b.box(0.4, 0.3, 0.35, 0x3d4a55, 3.1, 0.15, 0.2);
-    b.cyl(0.05, 0.9, 0xa9b3bb, 3.4, 0.3, 0.6).rotation.x = Math.PI / 2;
-    this.pumpLed = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 5), mat(0x5fe09a, { emissive: 0x5fe09a }));
-    this.pumpLed.position.set(3.1, 0.34, 0.2);
-    sc.add(this.pumpLed);
     b.box(0.7, 0.4, 0.5, 0xb38e68, -3.2, 0.2, 2.6);
     b.box(0.7, 0.4, 0.5, 0xa27a55, -3.2, 0.6, 2.6);
-    // 木箱の1つは .glb（v0.5 のダミー。読み込みとパスの確認用で、Phase 2 で本物のモデルに置き換える）
-    loadModel('dummy-crate').then(m => {
-      m.position.set(-2.4, 0, 2.7);
-      sc.add(m);
-    }, e => console.error(e));
+    b.box(0.7, 0.4, 0.5, 0xb38e68, -2.4, 0.2, 2.7);
   }
 
   /** 栽培槽（主役）：ガラス槽・水・浮きトレイ・LED・センサ・苗 */
@@ -445,7 +448,7 @@ export class Diorama {
       m.material.color.setHex(q > 0.9 ? 0x5fe09a : q > 0.5 ? 0xf2c230 : 0xff6b6b);
       m.material.emissive.copy(m.material.color);
     });
-    this.pumpLed.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(t * 4);
+    if (this.pumpLed) this.pumpLed.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(t * 4);
     if (t - this.monitorAt > 0.4) {
       this.monitorAt = t;
       this.monitor.draw(s, dg);

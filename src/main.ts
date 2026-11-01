@@ -4,9 +4,10 @@ import './ui/style.css';
 import { applyCommand, createSim, cropSpec, tick, type Command, type SimState } from './sim';
 import { PRESETS, type PresetName } from './render/camera';
 import { modelStatus } from './render/models';
-import { View } from './render/view';
+import { View, type Quality } from './render/view';
 import { Hud } from './ui/hud';
 import { showResult } from './ui/result';
+import { mountQuality } from './ui/quality';
 import { mountTools } from './ui/tools';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -79,6 +80,7 @@ menu.onclick = () => {
   menu.classList.remove('nw');
 };
 mountTools($('bar'), send);
+mountQuality($('qa'), q => view.setQuality(q));
 
 hud.update(s);
 layout();
@@ -117,6 +119,8 @@ Object.assign(window, {
     camera(name: PresetName, instant = true) { view.rig.goTo(name, instant); },
     toggleMenu() { menu.click(); },
     renderInfo() { return { ...view.renderer.info.render }; },
+    /** 画質を変える（例 hydro.quality({shadows:false,dpr:1})）。ボタンの表示と保存値は変えない */
+    quality(q: Quality) { view.setQuality(q); },
     /** 描画の調整用（露出・ライトの強度などをコンソールから試す） */
     view,
     /** .glb の読み込み状態（'ok' / 'error: <URL>'） */

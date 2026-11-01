@@ -8,6 +8,9 @@ import { Diorama } from './diorama';
 // 色管理は three の既定（有効）：16進の色は sRGB として読み、リニアで光を計算して sRGB で出力する。
 // トーンマッピングは Neutral（Khronos PBR Neutral）。ACES より指定した色の色相・彩度を崩しにくく、パレットで色を決める画調に合う
 
+/** 画質：shadows はリアルタイムの影（焼き込みの接地影は常に出す）、dpr は devicePixelRatio の上限 */
+export interface Quality { shadows: boolean; dpr: number }
+
 export class View {
   readonly renderer: THREE.WebGLRenderer;
   readonly rig = new CameraRig();
@@ -24,6 +27,13 @@ export class View {
     // 苗の配置などの見た目の乱数。sim の乱数とは別に固定シードで作る（スクリーンショットを再現できるように）
     this.diorama = new Diorama(mulberry32(seed));
     this.rig.attach(canvas);
+  }
+
+  /** 画質を変える。影の有無はシェーダーの作り直しになるので、切り替えた直後の1フレームは重い */
+  setQuality(q: Quality): void {
+    this.diorama.sun.castShadow = q.shadows;
+    // setPixelRatio は今の大きさで描画バッファを作り直す（resize を呼び直さなくてよい）
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, q.dpr));
   }
 
   /** safes：3D がパネルに隠れない領域の候補（カメラは被写体が大きく映る方を使う） */
