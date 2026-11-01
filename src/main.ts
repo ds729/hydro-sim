@@ -9,6 +9,7 @@ import { Hud } from './ui/hud';
 import { shortName, showResult } from './ui/result';
 import { mountQuality } from './ui/quality';
 import { mountTools } from './ui/tools';
+import { QuizPanel } from './ui/quiz';
 
 const $ = (id: string) => document.getElementById(id)!;
 const app = $('app'), menu = $('mb');
@@ -27,9 +28,34 @@ let resultShown = false;
 const view = new View($('cv') as HTMLCanvasElement);
 const hud = new Hud(cropSpec(s), () => { if (!app.classList.contains('so')) menu.classList.add('nw'); });
 
+/** 症状診断モード。診断中は栽培を止め、栽培の状態はそのまま残す */
+const quiz = new QuizPanel(() => setMode('grow'));
+
 function send(c: Command) {
-  if (applyCommand(s, c)) dirty = true;
+  if (!quiz.active && applyCommand(s, c)) dirty = true;
 }
+
+/** モードを切り替える（栽培 ⇔ 症状診断）。seed は診断の問題の乱数 */
+function setMode(m: 'grow' | 'quiz', seed = Date.now()) {
+  if (m === 'quiz') quiz.start(seed); else quiz.stop();
+  app.classList.toggle('qm', m === 'quiz');
+  for (const [k, b] of modeBtns) b.classList.toggle('on', k === m);
+  view.rig.goTo(m === 'quiz' ? '寄り' : '全景');
+  dirty = true;
+}
+const modeBtns = ([['grow', '栽培'], ['quiz', '症状診断']] as const).map(([k, label]) => {
+  const b = document.createElement('button');
+  b.textContent = label;
+  if (k === 'grow') b.className = 'on';
+  b.onclick = () => {
+    if (k === (quiz.active ? 'quiz' : 'grow')) return;
+    setMode(k);
+    // スマホは ☰ を閉じて 3D を見せる
+    if (app.classList.contains('so')) menu.click();
+  };
+  $('md').appendChild(b);
+  return [k, b] as const;
+});
 
 /** 始め直す。作物を省くと今の作物のまま */
 function restart(crop = s.crop.id) {
@@ -119,14 +145,16 @@ let frames = 0, fpsAt = last, fps = 0;
 function loop(now: number) {
   const dt = Math.min(0.25, (now - last) / 1000);
   last = now;
-  if (!s.result && speed) {
+  if (!quiz.active && !s.result && speed) {
     acc += dt * speed;
     while (acc >= 1 && !s.result) { acc--; tick(s); dirty = true; }
   }
   sinceHud += dt;
-  if (dirty || sinceHud > 0.1) { hud.update(s); dirty = false; sinceHud = 0; }
-  if (s.result && !resultShown) { resultShown = true; showResult(s.result, s.crop.id, restart); }
-  view.frame(s, now / 1000);
+  if (!quiz.active) {
+    if (dirty || sinceHud > 0.1) { hud.update(s); dirty = false; sinceHud = 0; }
+    if (s.result && !resultShown) { resultShown = true; showResult(s.result, s.crop.id, restart); }
+  }
+  view.frame(quiz.sim ?? s, now / 1000, quiz.blind);
   frames++;
   if (now - fpsAt >= 1000) {
     fps = (frames * 1000) / (now - fpsAt);
@@ -151,6 +179,9 @@ Object.assign(window, {
     camera(name: PresetName, instant = true) { view.rig.goTo(name, instant); },
     toggleMenu() { menu.click(); },
     renderInfo() { return { ...view.renderer.info.render }; },
+    /** 症状診断モード：mode('quiz', seed) で始める。quiz.answer({factor:'ec',side:'high'})・quiz.next() で進める */
+    mode: setMode,
+    quiz,
     /** 直近1秒の平均 fps */
     get fps() { return fps; },
     /** 画質を変える（例 hydro.quality({shadows:false,dpr:1})）。ボタンの表示と保存値は変えない */

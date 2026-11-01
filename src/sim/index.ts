@@ -5,3 +5,4 @@ export * from './compartment';
 export * from './crop';
 export * from './fitness';
 export * from './rng';
+export * from './quiz';

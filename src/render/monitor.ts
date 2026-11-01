@@ -67,4 +67,18 @@ export class Monitor {
     x.fillRect(16, 246, 480 * s.crop.growth, 14);
     this.texture.needsUpdate = true;
   }
+
+  /** 症状診断モードの出題中：値を伏せる */
+  drawBlind(): void {
+    const x = this.ctx;
+    x.fillStyle = '#0f2a2e';
+    x.fillRect(0, 0, W, H);
+    x.font = 'bold 22px sans-serif';
+    x.fillStyle = '#8be3c4';
+    x.fillText('症状診断中', 16, 32);
+    x.fillStyle = '#d9efe6';
+    x.font = '20px sans-serif';
+    x.fillText('センサの値は答えたあとに表示します', 16, 140);
+    this.texture.needsUpdate = true;
+  }
 }

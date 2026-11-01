@@ -15,10 +15,14 @@ small{color:var(--mu);font-size:11px;display:block;margin-top:6px}
 #res{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}#res .pn{position:static;width:300px;padding:18px}
 #res h2{margin:0 0 8px;font-size:18px}#res table{width:100%;margin:8px 0 12px}#res td:last-child{text-align:right}
 .hd{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 8px;margin:0 0 8px}#cn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;font-size:12px;color:var(--mu)}#mb,.sn{display:none}#mb.nw::after{content:'●';color:#e0a100;margin-left:3px}
+/* 症状診断モード（#app.qm）：HUD のゲージと道具を隠し、問題（#qz）と選択肢（#qb）を出す */
+#qh,#qz,#qb{display:none}#app.qm #qh{display:inline}#app.qm #qz{display:block}#app.qm #qb{display:flex}#qb{gap:inherit;flex-direction:inherit}#app.qm :is(#day,#cn,#gs,#gh,#ch,.gm),#app.qm #bar>.tl{display:none}
+#qz p{margin:0 0 6px;line-height:1.5}#qz small{color:var(--mu);line-height:1.5;display:block;margin-bottom:4px}.qq{font-size:14px}.qr{font-weight:700;font-size:15px;margin-bottom:4px}.qr.ok{color:#2f9e5b}.qr.ng{color:#d64545}.qs{font-size:11px;color:var(--mu)}.qo{color:#d64545}.ql{margin:0 0 8px;padding-left:0;list-style:none;line-height:1.7}#qz .ql small{color:var(--mu);margin-left:6px;display:inline}
+#qb .tl:disabled{opacity:.45;cursor:default}#qb .tl.ok{opacity:1;border-color:#2f9e5b;box-shadow:0 0 0 2px #2f9e5b}#qb .tl.ng{opacity:1;border-color:#d64545;box-shadow:0 0 0 2px #d64545}#qb .tl em{font-size:9px;white-space:nowrap}#app.qm .ln{display:none}#app.qm .sn{display:block}#app.qm #qh{flex:1;min-width:0}
 /* スマホ幅：HUD は上端に横長で詰め、時間・カメラ・日誌は ☰ で開閉する */
 @media(max-width:720px),(max-height:500px){#hud{left:8px;right:8px;top:8px;width:auto;padding:8px 10px;font-size:11px;border-radius:14px}.hd{flex-wrap:nowrap;margin-bottom:4px}#cn{flex:1;min-width:0;font-size:11px}#mb{display:block;margin:0;padding:2px 10px;flex:none}
 #gs{display:grid;grid-template-columns:repeat(3,1fr);gap:0 12px}#gh{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}#hud .row{margin-bottom:4px}#ch,.ln{display:none}.sn{display:block;margin-top:2px}
-#side{display:none;left:8px;right:8px;width:auto;overflow-y:auto}#app.so #side{display:flex}#jl{max-height:28vh}.tl{width:54px}#bar{gap:4px;padding:6px 8px}}
+#side{display:none;left:8px;right:8px;width:auto;overflow-y:auto}#app.so #side{display:flex}#qb .tl em{display:none}#jl{max-height:28vh}.tl{width:54px}#bar{gap:4px;padding:6px 8px}}
 /* 横向きスマホ：HUD は左の縦長、道具バーは右の縦並びにして 3D に高さを残す（main.ts の LAND と同じ条件）。☰ の中身は main.ts が HUD と道具バーの間に置く */
 @media(max-height:500px) and (min-aspect-ratio:4/3){#hud{right:auto;width:200px;left:calc(8px + env(safe-area-inset-left,0px))}.hd{flex-wrap:wrap}#cn{order:3;flex-basis:100%}#mb{margin-left:auto}#gs,#gh{grid-template-columns:1fr}
 #bar{left:auto;right:calc(8px + env(safe-area-inset-right,0px));bottom:auto;top:50%;transform:translateY(-50%);flex-direction:column}.tl{padding:3px 2px}.tl b{font-size:20px}}

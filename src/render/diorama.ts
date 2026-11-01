@@ -66,6 +66,8 @@ function mergeTori(rings: readonly (readonly [number, number, number])[], r: num
   return mergeGeometries(rings.map(([R, x, y]) => new THREE.TorusGeometry(R, r, 4, 14).rotateX(Math.PI / 2).translate(x, y, 0)));
 }
 
+/** 伏せた状態ランプの色（消灯） */
+const LAMP_OFF = 0x3a4048;
 const C_HEALTHY = new THREE.Color(0x6fd06a), C_DEAD = new THREE.Color(0x9a7a44);
 const C_ROOT = new THREE.Color(0xf6f2e6), C_ROOT_BAD = new THREE.Color(0x7d5632);
 /** 症状の色 [低い側, 高い側]。EC低＝黄緑、EC高＝茶、pH低＝紫、pH高＝白っぽい黄、液量不足＝くすんだ緑 */
@@ -98,6 +100,8 @@ export class Diorama {
   /** 作物の健康な茎・葉の色（update で crops.json の look から入れる） */
   private stemColor = new THREE.Color();
   private leafColor = new THREE.Color();
+  /** モニタを伏せているか（切り替わったらすぐ描き直す） */
+  private blind = false;
   /** 表示中の液量（実際の値に滑らかに追従させる） */
   private shownWater = 2;
   /** 生育段階（4段階）が変わった時刻。苗が弾む演出に使う */
@@ -391,8 +395,11 @@ export class Diorama {
     boxes.push([0.06, 0.02, 0.02, 0xf2f6f8, -3.27, 0.89, 2.5]);
   }
 
-  /** 状態を見た目に反映する。t は秒。最も悪い要因が苗の色と形を決める */
-  update(s: SimState, t: number): void {
+  /**
+   * 状態を見た目に反映する。t は秒。最も悪い要因が苗の色と形を決める。
+   * blind：センサの表示（制御盤の状態ランプ・モニタ）を伏せる（症状診断モードで、見た目だけから当てさせる）
+   */
+  update(s: SimState, t: number, blind = false): void {
     const dg = diagnose(s), f = dg.fitness, { key: wk, side } = dg.worst, ws = 1 - dg.worst.value;
     const hp = s.crop.health, g = s.crop.growth, du = this.dummy, tc = this.color;
     // 作物ごとの形と色（crops.json の look）。症状の色はこの健康な色から寄せる
@@ -447,13 +454,14 @@ export class Diorama {
     this.bubbles.instanceMatrix.needsUpdate = true;
     this.lamps.forEach((m, i) => {
       const q = [f.ec, f.ph, f.water][i];
-      m.material.color.setHex(q > 0.9 ? 0x5fe09a : q > 0.5 ? 0xf2c230 : 0xff6b6b);
+      m.material.color.setHex(blind ? LAMP_OFF : q > 0.9 ? 0x5fe09a : q > 0.5 ? 0xf2c230 : 0xff6b6b);
       m.material.emissive.copy(m.material.color);
     });
     if (this.pumpLed) this.pumpLed.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(t * 4);
-    if (t - this.monitorAt > 0.4) {
+    if (t - this.monitorAt > 0.4 || blind !== this.blind) {
       this.monitorAt = t;
-      this.monitor.draw(s, dg);
+      this.blind = blind;
+      if (blind) this.monitor.drawBlind(); else this.monitor.draw(s, dg);
     }
   }
 }

@@ -42,9 +42,9 @@ export class View {
     this.rig.setViewport(w, h, safes);
   }
 
-  /** 状態を反映して1フレーム描く。t は秒 */
-  frame(s: SimState, t: number): void {
-    this.diorama.update(s, t);
+  /** 状態を反映して1フレーム描く。t は秒、blind はセンサの表示を伏せる（症状診断モード） */
+  frame(s: SimState, t: number, blind = false): void {
+    this.diorama.update(s, t, blind);
     this.rig.update();
     this.renderer.render(this.diorama.scene, this.rig.camera);
   }

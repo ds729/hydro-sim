@@ -12,7 +12,8 @@ export interface Supply {
 }
 
 export const SUPPLIES = suppliesJson as Record<'fertilizer' | 'water' | 'phDown' | 'phUp' | 'solution', Supply>;
-export type DoseSupply = Exclude<keyof typeof SUPPLIES, 'solution'>;
+export type SupplyId = keyof typeof SUPPLIES;
+export type DoseSupply = Exclude<SupplyId, 'solution'>;
 
 export type Command =
   /** 資材を区画に入れる（amount は資材の単位で） */
