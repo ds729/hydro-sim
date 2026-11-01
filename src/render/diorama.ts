@@ -107,7 +107,8 @@ export class Diorama {
     // 光の強度は物理単位（π で旧来の 1 に相当）。上向きの面がほぼ指定色になり、影の側は 6 割ほどの明るさに残る（影は薄く）
     sc.add(new THREE.HemisphereLight(0xfff6ea, 0xb4bccf, 2.3));
     const sun = (this.sun = new THREE.DirectionalLight(0xfff0dc, 1.7));
-    sun.position.set(6, 9, 5);
+    // 左の面（+z）を明るく、右の面（+x）を暗くして立体感を出す（参照画像の光の向き）。仰角は 49° のまま（上向きの面の明るさを変えない）
+    sun.position.set(1, 9.5, 8.2);
     sun.castShadow = true;
     // 解像度を下げてぼかす（柔らかい影。スマホでも安い）
     sun.shadow.mapSize.set(1024, 1024);
@@ -127,6 +128,8 @@ export class Diorama {
       [3.7, 1.0, 0.9, 0.9, 0.38], [3.1, 0.2, 0.4, 0.35, 0.3],
       [-3.2, 2.6, 0.7, 0.5, 0.38], [-2.4, 2.7, 0.7, 0.5, 0.38],
       [4.15, 2.05, 0.3, 0.3, 0.32], [3.37, 2.95, 0.45, 0.45, 0.25], [-4.15, 1.87, 0.42, 0.65, 0.35], [-2.75, 0.25, 2.3, 0.18, 0.18],
+      // 小物（room_props）：台車・消火器・踏み台・ポリ容器
+      [-2.65, 1.45, 0.95, 0.6, 0.3], [-4.22, 3.3, 0.2, 0.2, 0.32], [4.0, -1.42, 0.45, 0.5, 0.3], [4.12, 2.85, 0.26, 0.34, 0.32],
     ], 0.45, 24);
     ao.position.y = 0.02;
     sc.add(ao);
@@ -268,7 +271,7 @@ export class Diorama {
     }
   }
 
-  /** 制御盤・状態ランプ・モニタ・養液タンク・ポンプ・木箱。制御盤と養液タンク（ポンプ・配管込み）は .glb */
+  /** 制御盤・状態ランプ・モニタ・養液タンク・ポンプ。制御盤と養液タンク（ポンプ・配管込み）は .glb */
   private buildEquipment(b: Builder) {
     const sc = this.scene;
     // ランプは状態で色を変えるので、1つずつ自前の発光マテリアルに差し替える
@@ -294,9 +297,6 @@ export class Diorama {
     const screen = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.2), new THREE.MeshBasicMaterial({ map: this.monitor.texture, toneMapped: false }));
     screen.position.set(0, 3.7, -3.31);
     sc.add(screen);
-    b.box(0.7, 0.4, 0.5, 0xb38e68, -3.2, 0.2, 2.6);
-    b.box(0.7, 0.4, 0.5, 0xa27a55, -3.2, 0.6, 2.6);
-    b.box(0.7, 0.4, 0.5, 0xb38e68, -2.4, 0.2, 2.7);
   }
 
   /** 栽培槽（主役）：ガラス槽・水・浮きトレイ・LED・センサ・苗 */
@@ -373,24 +373,19 @@ export class Diorama {
     boxes.push([len, 0.035, 0.18, 0x4a5058, cx, 0.0175, duct], [len, 0.004, 0.05, 0xf2c230, cx, 0.037, duct]);
   }
 
-  /** 作業の小物：バケツ・ホース・肥料袋（A液・B液）・計量カップ・壁のクリップボード */
+  /**
+   * 作業の小物。木箱・バケツ・肥料袋（A液・B液）・壁のクリップボード・台車と播種トレイ・消火器・薬剤棚・踏み台・ポリ容器・排水口は
+   * .glb（room_props。原点は部屋の原点）。ホース（管）と計量カップ（半透明）は手続き生成
+   */
   private buildProps(b: Builder, boxes: BoxSpec[]) {
-    // バケツ（養液タンクの手前）と取っ手
-    b.add(new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.13, 0.32, 10), mat(0xd9dde0)), 4.15, 0.16, 2.05);
-    b.add(new THREE.Mesh(new THREE.TorusGeometry(0.165, 0.01, 4, 10, Math.PI), mat(0x8a949c)), 4.15, 0.32, 2.05).rotation.y = 0.6;
+    loadModel('room_props').then(m => this.scene.add(m), e => console.error(e));
     // 巻いたホース（3巻きを1つの形にまとめる）と、養液タンクへ伸びる先
     const hose = 0x2f7062, coil = mergeTori([0, 1, 2].map(k => [0.22 - k * 0.01, k * 0.02, 0.025 + k * 0.045] as const), 0.025);
     b.add(new THREE.Mesh(coil, mat(hose)), 3.35, 0, 2.95);
     this.scene.add(tube([[3.57, 0.07, 2.95], [3.85, 0.025, 2.6], [3.88, 0.025, 1.7], [3.85, 0.15, 1.42]], 0.025, hose, 0.2));
-    // 肥料袋（左の壁際に2袋。帯の色で A液・B液を見分ける）
-    for (const [y, z, ry, band] of [[0.08, 1.85, 0, 0xd9893f], [0.23, 1.9, 0.12, 0x5b8fc4]]) {
-      boxes.push([0.4, 0.15, 0.6, 0xe6dcc6, -4.15, y, z, ry], [0.405, 0.152, 0.12, band, -4.15, y, z, ry]);
-    }
     // 計量カップ（木箱の上）と取っ手
     b.add(new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.05, 0.13, 8), mat(0xf2f6f8, { transparent: true, opacity: 0.75 })), -3.35, 0.865, 2.5);
     boxes.push([0.06, 0.02, 0.02, 0xf2f6f8, -3.27, 0.89, 2.5]);
-    // 栽培日誌のクリップボード（左の壁、制御盤の手前）：板・紙・留め金
-    boxes.push([0.02, 0.4, 0.3, 0xb38e68, -4.39, 1.55, 1.75], [0.006, 0.32, 0.25, 0xfdfbf5, -4.377, 1.53, 1.75], [0.03, 0.04, 0.1, 0xa9b3bb, -4.37, 1.74, 1.75]);
   }
 
   /** 状態を見た目に反映する。t は秒。最も悪い要因が苗の色と形を決める */

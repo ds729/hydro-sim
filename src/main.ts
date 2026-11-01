@@ -92,6 +92,9 @@ const ro = new ResizeObserver(() => layout());
 for (const id of ['hud', 'side', 'bar']) ro.observe($(id));
 
 let last = performance.now(), acc = 0, sinceHud = 0;
+/** fps の表示（画質の見出しの右）。1秒ごとに直近1秒の平均を出す。実機で画質を選ぶ目安 */
+const fpsEl = $('fps');
+let frames = 0, fpsAt = last, fps = 0;
 function loop(now: number) {
   const dt = Math.min(0.25, (now - last) / 1000);
   last = now;
@@ -103,6 +106,13 @@ function loop(now: number) {
   if (dirty || sinceHud > 0.1) { hud.update(s); dirty = false; sinceHud = 0; }
   if (s.result && !resultShown) { resultShown = true; showResult(s.result, restart); }
   view.frame(s, now / 1000);
+  frames++;
+  if (now - fpsAt >= 1000) {
+    fps = (frames * 1000) / (now - fpsAt);
+    fpsEl.textContent = `${Math.round(fps)} fps`;
+    frames = 0;
+    fpsAt = now;
+  }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
@@ -119,6 +129,8 @@ Object.assign(window, {
     camera(name: PresetName, instant = true) { view.rig.goTo(name, instant); },
     toggleMenu() { menu.click(); },
     renderInfo() { return { ...view.renderer.info.render }; },
+    /** 直近1秒の平均 fps */
+    get fps() { return fps; },
     /** 画質を変える（例 hydro.quality({shadows:false,dpr:1})）。ボタンの表示と保存値は変えない */
     quality(q: Quality) { view.setQuality(q); },
     /** 描画の調整用（露出・ライトの強度などをコンソールから試す） */
