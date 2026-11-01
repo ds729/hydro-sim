@@ -42,6 +42,25 @@ export function bakedShadow(w: number, d: number, rects: ShadowRect[], falloff: 
   return m;
 }
 
+/** 箱の並び：幅・高さ・奥行き、色、中心 x・y・z、Y 軸回りの回転 */
+export type BoxSpec = [w: number, h: number, d: number, color: number, x: number, y: number, z: number, ry?: number];
+
+/** 動かない小さな箱をまとめて InstancedMesh 1つにする（draw call を増やさないため。棚・トレイ・小物など） */
+export function boxSet(parent: THREE.Object3D, boxes: BoxSpec[]): THREE.InstancedMesh {
+  const m = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat(0xffffff), boxes.length), du = new THREE.Object3D(), c = new THREE.Color();
+  boxes.forEach(([w, h, d, color, x, y, z, ry = 0], i) => {
+    du.position.set(x, y, z);
+    du.rotation.set(0, ry, 0);
+    du.scale.set(w, h, d);
+    du.updateMatrix();
+    m.setMatrixAt(i, du.matrix);
+    m.setColorAt(i, c.setHex(color));
+  });
+  m.castShadow = m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+
 /** parent に影つきで部品を足す */
 export class Builder {
   constructor(public parent: THREE.Object3D) {}

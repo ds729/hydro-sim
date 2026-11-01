@@ -2,15 +2,69 @@
 // 苗・水位・ランプ・モニタは sim の状態から毎フレーム作り直す
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { bedOf, diagnose, mulberry32, type Factor, type SimState } from '../sim';
-import { bakedShadow, Builder, LED, mat, SLAB } from './build';
+import { bakedShadow, boxSet, Builder, LED, mat, SLAB, type BoxSpec } from './build';
 import { loadModel } from './models';
 import { Monitor } from './monitor';
 
-/** 栽培槽：幅・奥行き・水位の最大高さ・トレイの高さ・底板の上面 */
-const W = 4, D = 2.4, HM = 1.45, TY = 1.8, WB = 0.23;
+/** 栽培槽：幅・奥行き・水位の最大高さ・底板の上面 */
+const W = 4, D = 2.4, HM = 1.45, WB = 0.23;
+/** 浮きトレイの受けの高さ（水位の最大に対する割合）。液量が容量のこの割合を下回るとトレイが受けに乗り、根が水から離れる */
+const STOP = 0.4;
 /** 苗の並び */
 const NX = 14, NZ = 8, N = NX * NZ;
+/** EC・pH センサのプローブ（栽培槽の中の x と z、頭の高さ） */
+const PROBE_X = 1.88, PROBE_Z = [-0.9, 0.9], PROBE_TOP = 2.05;
+
+/** 苗の形（栽培槽と補助ラックで共有し、縮尺を揃える） */
+const STEM_GEO = new THREE.CylinderGeometry(0.014, 0.02, 1, 5).translate(0, 0.5, 0);
+const LEAF_GEO = new THREE.IcosahedronGeometry(0.075, 1), LEAF_GEO_LOW = new THREE.IcosahedronGeometry(0.075, 0);
+
+/**
+ * 苗1本（茎1本＋子葉2枚）の行列を stems の i 番、leaves の 2i・2i+1 番に入れる。
+ * y は茎の根元、hg は茎の高さ、sz は子葉の大きさ、a は子葉の向き、sw は揺れ、tilt は子葉の垂れ
+ */
+function setSeedling(du: THREE.Object3D, stems: THREE.InstancedMesh, leaves: THREE.InstancedMesh, i: number,
+  x: number, y: number, z: number, hg: number, sz: number, a: number, sw: number, tilt: number) {
+  du.position.set(x, y, z);
+  du.rotation.set(0, 0, sw);
+  du.scale.set(1, hg, 1);
+  du.updateMatrix();
+  stems.setMatrixAt(i, du.matrix);
+  for (let k = 0; k < 2; k++) {
+    const b = a + k * Math.PI;
+    du.position.set(x + Math.cos(b) * 0.06 * sz + sw * hg, y + hg, z + Math.sin(b) * 0.06 * sz);
+    du.rotation.set(0, -b, (k ? 1 : -1) * tilt);
+    du.scale.set(sz, sz * 0.28, sz * 0.85);
+    du.updateMatrix();
+    leaves.setMatrixAt(i * 2 + k, du.matrix);
+  }
+}
+
+/**
+ * 折れ線を角だけ丸めた管（ケーブル・ホース）。r は管の半径、bend は角の丸めの長さ
+ */
+function tube(points: [number, number, number][], r: number, color: number, bend = 0.08): THREE.Mesh {
+  const p = points.map(q => new THREE.Vector3(...q)), path = new THREE.CurvePath<THREE.Vector3>();
+  let from = p[0];
+  for (let i = 1; i < p.length - 1; i++) {
+    const a = p[i].clone().sub(p[i - 1]), b = p[i + 1].clone().sub(p[i]);
+    const d = Math.min(bend, a.length() / 2, b.length() / 2);
+    const s = p[i].clone().addScaledVector(a.normalize(), -d), e = p[i].clone().addScaledVector(b.normalize(), d);
+    path.add(new THREE.LineCurve3(from, s));
+    path.add(new THREE.QuadraticBezierCurve3(s, p[i], e));
+    from = e;
+  }
+  path.add(new THREE.LineCurve3(from, p[p.length - 1]));
+  const len = path.getLength();
+  return new THREE.Mesh(new THREE.TubeGeometry(path, Math.ceil(len * 24), r, 5), mat(color));
+}
+
+/** 床に寝かせた輪を重ねた形（巻いたホース）。rings は [輪の半径, x のずれ, 高さ]、r は管の半径 */
+function mergeTori(rings: readonly (readonly [number, number, number])[], r: number): THREE.BufferGeometry {
+  return mergeGeometries(rings.map(([R, x, y]) => new THREE.TorusGeometry(R, r, 4, 14).rotateX(Math.PI / 2).translate(x, y, 0)));
+}
 
 const C_HEALTHY = new THREE.Color(0x6fd06a), C_DEAD = new THREE.Color(0x9a7a44);
 const C_ROOT = new THREE.Color(0xf6f2e6), C_ROOT_BAD = new THREE.Color(0x7d5632);
@@ -29,6 +83,7 @@ export class Diorama {
   private lamps: THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>[] = [];
   private pumpLed!: THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>;
   private water!: THREE.Mesh;
+  private raft!: THREE.Group;
   private stems!: THREE.InstancedMesh;
   private leaves!: THREE.InstancedMesh;
   private roots!: THREE.InstancedMesh;
@@ -67,15 +122,21 @@ export class Diorama {
       [-4.15, 0.6, 0.5, 1.3, 0.38], [0.6, 0.8, W + 0.3, D + 0.3, 0.42],
       [3.7, 1.0, 0.9, 0.9, 0.38], [3.1, 0.2, 0.4, 0.35, 0.3],
       [-3.2, 2.6, 0.7, 0.5, 0.38], [-2.4, 2.7, 0.7, 0.5, 0.38],
+      [4.15, 2.05, 0.3, 0.3, 0.32], [3.37, 2.95, 0.45, 0.45, 0.25], [-4.15, 1.87, 0.42, 0.65, 0.35], [-2.75, 0.25, 2.3, 0.18, 0.18],
     ], 0.45, 24);
     ao.position.y = 0.02;
     sc.add(ao);
-    this.buildSlab(new Builder(sc));
-    this.buildRoom(new Builder(sc));
-    this.buildRacks(new Builder(sc));
-    this.buildEquipment(new Builder(sc));
+    const b = new Builder(sc);
+    this.buildSlab(b);
+    this.buildRoom(b);
+    this.buildRacks(b);
+    this.buildEquipment(b);
     this.buildTank();
-    this.buildCables();
+    // 小さな箱（ケーブルプロテクター・小物）は InstancedMesh 1つにまとめる
+    const boxes: BoxSpec[] = [];
+    this.buildCables(boxes);
+    this.buildProps(b, boxes);
+    boxSet(sc, boxes);
   }
 
   /**
@@ -151,37 +212,54 @@ export class Diorama {
     b.box(0.34, 0.4, 7.4, 0x9fb8aa, -4.55, 0.2, 0);
     b.box(9.4, 0.12, 0.42, 0xeee9df, 0, 4.66, -3.55);
     b.box(0.42, 0.12, 7.4, 0xeee9df, -4.55, 4.66, 0);
-    for (let i = 0; i < 8; i++) b.box(0.08, 4.2, 0.06, 0xb7cfc0, -4 + i * 1.15, 2.4, -3.38);
     b.cyl(0.07, 9, 0xa9b3bb, 0, 4.5, -3.3).rotation.z = Math.PI / 2;
-    // 床の黄色い区画線
+    // 壁の柱と床の黄色い区画線
+    const boxes: BoxSpec[] = [];
+    for (let i = 0; i < 8; i++) boxes.push([0.08, 4.2, 0.06, 0xb7cfc0, -4 + i * 1.15, 2.4, -3.38]);
     for (const [x, z, w, d] of [[0.6, -0.7, 4.8, 0.08], [0.6, 2.3, 4.8, 0.08], [-1.8, 0.8, 0.08, 3], [3, 0.8, 0.08, 3]]) {
-      b.box(w, 0.012, d, 0xf2c230, x, 0.006, z);
+      boxes.push([w, 0.012, d, 0xf2c230, x, 0.006, z]);
     }
+    boxSet(b.parent, boxes);
   }
 
-  /** 奥の壁沿いの補助ラック（飾り）。苗の塊は1つの InstancedMesh にまとめる */
+  /**
+   * 奥の壁沿いの補助ラック（飾り）。棚ごとに播種日をずらしたトレイを置く（生育段階が棚で違う）。
+   * 苗は栽培槽と同じ形・間隔・縮尺で作り、茎と葉は InstancedMesh 1つずつ
+   */
   private buildRacks(b: Builder) {
-    const r = this.rand, clumps: [number, number, number, number][] = [];
-    for (const [x, z] of [[-2.4, -2.8], [3.2, -2.8]]) {
+    // 栽培槽の苗の配置の乱数を変えないよう別のシードで作る
+    const r = mulberry32(11), plants: [number, number, number, number][] = [], boxes: BoxSpec[] = [];
+    /** 棚の生育段階（0〜1）。棚の高さ 0.85 に収まるよう栽培槽の収穫前より手前で止める */
+    const stages = [0.15, 0.35, 0.55];
+    [[-2.4, -2.8], [3.2, -2.8]].forEach(([x, z], ri) => {
       for (const i of [-1, 1]) for (const j of [-1, 1]) b.cyl(0.04, 2.8, 0xa9b3bb, x + i * 1.1, 1.4, z + j * 0.42, {}, 6);
       for (let t = 0; t < 3; t++) {
-        const y = 0.5 + t * 0.85;
-        b.box(2.3, 0.06, 0.95, 0xe8eef2, x, y, z);
+        const y = 0.5 + t * 0.85, g = stages[(t + ri * 2) % 3];
         b.box(2.0, 0.06, 0.2, 0xffffff, x, y + 0.55, z, LED);
-        for (let k = 0; k < 13; k++) clumps.push([x - 0.95 + k * 0.15 + r() * 0.05, y + 0.1, z + (r() - 0.5) * 0.6, 0.08 + r() * 0.06]);
+        // 棚板・トレイ・マット・棚札（播種日のラベル）
+        boxes.push([2.3, 0.06, 0.95, 0xe8eef2, x, y, z], [2.1, 0.05, 0.8, 0xf4ecd8, x, y + 0.055, z],
+          [1.9, 0.02, 0.6, 0x857b6e, x, y + 0.09, z], [0.16, 0.06, 0.01, 0xfdfbf5, x - 0.8, y, z + 0.48]);
+        // 栽培槽と同じ約 0.27m 間隔
+        for (let i = 0; i < 7; i++) for (let j = 0; j < 3; j++) {
+          plants.push([x + (i - 3) * 0.27 + (r() - 0.5) * 0.05, y + 0.1, z + (j - 1) * 0.24 + (r() - 0.5) * 0.05, g * (0.85 + r() * 0.3)]);
+        }
       }
-    }
-    const m = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), mat(0xffffff), clumps.length), du = this.dummy;
-    clumps.forEach(([x, y, z, s], i) => {
-      du.position.set(x, y, z);
-      du.scale.set(s, s * 0.8, s);
-      du.rotation.set(0, i, 0);
-      du.updateMatrix();
-      m.setMatrixAt(i, du.matrix);
-      m.setColorAt(i, this.color.setHSL(0.27 + r() * 0.06, 0.45, 0.42 + r() * 0.12, THREE.SRGBColorSpace));
     });
-    m.castShadow = true;
-    b.parent.add(m);
+    boxSet(b.parent, boxes);
+    // 子葉は遠目なので面数の少ない形にする（形と大きさは栽培槽と同じ）
+    const du = this.dummy, n = plants.length;
+    const stems = new THREE.InstancedMesh(STEM_GEO, mat(0xffffff), n), leaves = new THREE.InstancedMesh(LEAF_GEO_LOW, mat(0xffffff), n * 2);
+    plants.forEach(([x, y, z, g], i) => {
+      setSeedling(du, stems, leaves, i, x, y, z, 0.02 + g * 0.55, 0.25 + g * 1.3, r() * 6.28, (r() - 0.5) * 0.06, 0);
+      this.color.copy(C_HEALTHY).offsetHSL(0, 0, (r() - 0.5) * 0.04);
+      stems.setColorAt(i, this.color);
+      leaves.setColorAt(i * 2, this.color);
+      leaves.setColorAt(i * 2 + 1, this.color);
+    });
+    for (const m of [stems, leaves]) {
+      m.castShadow = true;
+      b.parent.add(m);
+    }
   }
 
   /** 制御盤・状態ランプ・モニタ・養液タンク・ポンプ・木箱 */
@@ -232,19 +310,25 @@ export class Diorama {
     for (const i of [-1, 1]) b.box(0.08, 0.08, D, 0xa9b3bb, (i * W) / 2, 3.0, 0);
     this.water = new THREE.Mesh(new THREE.BoxGeometry(W - 0.08, 1, D - 0.08), mat(0x5cc0c8, { transparent: true, opacity: 0.6 }));
     tg.add(this.water);
-    b.box(W - 0.06, 0.07, D - 0.06, 0xf4ecd8, 0, TY, 0);
-    b.box(W - 0.3, 0.03, D - 0.4, 0x857b6e, 0, TY + 0.06, 0);
+    // 浮きトレイ（湛液型の定植パネル）：水面に浮き、液量が減ると受けに乗る。苗と根はトレイの子にする（原点＝トレイの中心）
+    this.raft = new THREE.Group();
+    tg.add(this.raft);
+    const rb = new Builder(this.raft);
+    rb.box(W - 0.06, 0.07, D - 0.06, 0xf4ecd8, 0, 0, 0);
+    rb.box(W - 0.3, 0.03, D - 0.4, 0x857b6e, 0, 0.06, 0);
+    // トレイの受け（ガラスの内側の長辺に4つ）。上面がトレイの底になる高さ
+    boxSet(tg, [-1.3, 1.3].flatMap(x => [-1, 1].map((z): BoxSpec => [0.16, 0.04, 0.05, 0xa9b3bb, x, WB + STOP * HM - 0.02, z * (D / 2 - 0.03)])));
     // LED バーは細く（寄りで苗を隠す幅を減らす）
     for (const z of [-0.55, 0.55]) b.box(W - 0.4, 0.08, 0.14, 0xffffff, 0, 2.85, z, LED);
     // LED の照り返し（トレイと苗をほんのり桃色に）。decay 1 で距離に対して緩やかに減衰させる
     const pl = new THREE.PointLight(0xffc4ec, 1.2, 7, 1);
     pl.position.set(0, 2.65, 0);
     tg.add(pl);
-    // EC・pH センサのプローブ
-    for (const [z, c] of [[-0.9, 0x4cc38a], [0.9, 0x4a8fe0]]) {
-      b.cyl(0.03, 1.4, 0x333c46, 1.88, TY - 0.5, z, {}, 6);
-      b.add(new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), mat(c)), 1.88, TY + 0.25, z);
-    }
+    // EC・pH センサのプローブ（槽の枠に固定。トレイの穴を通して液量が少ないときも水に届く長さ）
+    PROBE_Z.forEach((z, i) => {
+      b.cyl(0.03, PROBE_TOP - 0.4, 0x333c46, PROBE_X, (PROBE_TOP + 0.4) / 2 - 0.05, z, {}, 6);
+      b.add(new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), mat([0x4cc38a, 0x4a8fe0][i])), PROBE_X, PROBE_TOP, z);
+    });
     for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
       this.seedlings.push({
         x: (i / (NX - 1) - 0.5) * (W - 0.5) + (r() - 0.5) * 0.05,
@@ -252,31 +336,58 @@ export class Diorama {
         delay: r() * 0.25, size: 0.8 + r() * 0.4, phase: r() * 6.28,
       });
     }
-    const inst = (geo: THREE.BufferGeometry, n: number, cast: boolean) => {
+    const inst = (parent: THREE.Object3D, geo: THREE.BufferGeometry, n: number, cast: boolean) => {
       const m = new THREE.InstancedMesh(geo, mat(0xffffff), n);
       m.castShadow = cast;
-      tg.add(m);
+      parent.add(m);
       return m;
     };
-    const stem = new THREE.CylinderGeometry(0.014, 0.02, 1, 5).translate(0, 0.5, 0);
     const root = new THREE.CylinderGeometry(0.007, 0.003, 1, 4).translate(0, -0.5, 0);
-    this.stems = inst(stem, N, true);
-    this.leaves = inst(new THREE.IcosahedronGeometry(0.075, 1), N * 2, true);
-    this.roots = inst(root, N, false);
-    this.bubbles = inst(new THREE.IcosahedronGeometry(0.04, 0), 12, false);
+    this.stems = inst(this.raft, STEM_GEO, N, true);
+    this.leaves = inst(this.raft, LEAF_GEO, N * 2, true);
+    this.roots = inst(this.raft, root, N, false);
+    this.bubbles = inst(tg, new THREE.IcosahedronGeometry(0.04, 0), 12, false);
     Object.assign(this.bubbles.material, { transparent: true, opacity: 0.6 });
   }
 
-  /** センサケーブル（プローブ→制御盤） */
-  private buildCables() {
-    for (const z of [-0.9, 0.9]) {
-      const s = new THREE.Vector3(0.6 + 1.88, TY + 0.3, 0.8 + z);
-      const curve = new THREE.CatmullRomCurve3([
-        s, new THREE.Vector3(s.x, 3.3, s.z), new THREE.Vector3(-1, 3.5, -0.3),
-        new THREE.Vector3(-4, 3.3, 0.6), new THREE.Vector3(-4.15, 2.2, 0.6 + z * 0.15),
-      ]);
-      this.scene.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 30, 0.022, 4), mat(0x2b3138)));
+  /**
+   * センサケーブル（プローブ→制御盤）。宙を渡さず、槽の枠の梁の外側（右→奥）→左奥の柱の裏→槽の台→床のケーブルプロテクターの下を通す。
+   * 正面（断面）からは梁と柱の陰に隠れる。座標は部屋の座標（栽培槽の原点は (0.6, 0, 0.8)）
+   */
+  private buildCables(boxes: BoxSpec[]) {
+    const ox = 0.6, oz = 0.8, R = ox + W / 2, L = ox - W / 2, BK = oz - D / 2, duct = 0.25;
+    PROBE_Z.forEach((z, i) => {
+      // 2本は梁の上では上下に、床では左右にずらして並べる
+      const d = (i - 0.5) * 0.045, px = ox + PROBE_X, pz = oz + z, y = 3.0 + d;
+      this.scene.add(tube([
+        [px, PROBE_TOP + 0.05, pz], [px, 2.75, pz], [R + 0.06, 2.9, pz], [R + 0.06, y, pz], [R + 0.06, y, BK - 0.06],
+        [L + d, y, BK - 0.07], [L + d, 0.25, BK - 0.07], [L - 0.09, 0.25, BK - 0.07], [L - 0.09, 0.25, duct + d],
+        [L - 0.17, 0.25, duct + d], [L - 0.17, 0.02, duct + d], [-3.95, 0.02, duct + d],
+      ], 0.02, 0x2b3138));
+    });
+    // 床のケーブルプロテクター（槽の台の左端から制御盤の前まで）。灰色の本体に黄色の筋
+    const x0 = L - 0.12, x1 = -3.9, cx = (x0 + x1) / 2, len = x0 - x1;
+    boxes.push([len, 0.035, 0.18, 0x4a5058, cx, 0.0175, duct], [len, 0.004, 0.05, 0xf2c230, cx, 0.037, duct]);
+  }
+
+  /** 作業の小物：バケツ・ホース・肥料袋（A液・B液）・計量カップ・壁のクリップボード */
+  private buildProps(b: Builder, boxes: BoxSpec[]) {
+    // バケツ（養液タンクの手前）と取っ手
+    b.add(new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.13, 0.32, 10), mat(0xd9dde0)), 4.15, 0.16, 2.05);
+    b.add(new THREE.Mesh(new THREE.TorusGeometry(0.165, 0.01, 4, 10, Math.PI), mat(0x8a949c)), 4.15, 0.32, 2.05).rotation.y = 0.6;
+    // 巻いたホース（3巻きを1つの形にまとめる）と、養液タンクへ伸びる先
+    const hose = 0x2f7062, coil = mergeTori([0, 1, 2].map(k => [0.22 - k * 0.01, k * 0.02, 0.025 + k * 0.045] as const), 0.025);
+    b.add(new THREE.Mesh(coil, mat(hose)), 3.35, 0, 2.95);
+    this.scene.add(tube([[3.57, 0.07, 2.95], [3.85, 0.025, 2.6], [3.88, 0.025, 1.7], [3.85, 0.15, 1.42]], 0.025, hose, 0.2));
+    // 肥料袋（左の壁際に2袋。帯の色で A液・B液を見分ける）
+    for (const [y, z, ry, band] of [[0.08, 1.85, 0, 0xd9893f], [0.23, 1.9, 0.12, 0x5b8fc4]]) {
+      boxes.push([0.4, 0.15, 0.6, 0xe6dcc6, -4.15, y, z, ry], [0.405, 0.152, 0.12, band, -4.15, y, z, ry]);
     }
+    // 計量カップ（木箱の上）と取っ手
+    b.add(new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.05, 0.13, 8), mat(0xf2f6f8, { transparent: true, opacity: 0.75 })), -3.35, 0.865, 2.5);
+    boxes.push([0.06, 0.02, 0.02, 0xf2f6f8, -3.27, 0.89, 2.5]);
+    // 栽培日誌のクリップボード（左の壁、制御盤の手前）：板・紙・留め金
+    boxes.push([0.02, 0.4, 0.3, 0xb38e68, -4.39, 1.55, 1.75], [0.006, 0.32, 0.25, 0xfdfbf5, -4.377, 1.53, 1.75], [0.03, 0.04, 0.1, 0xa9b3bb, -4.37, 1.74, 1.75]);
   }
 
   /** 状態を見た目に反映する。t は秒。最も悪い要因が苗の色と形を決める */
@@ -294,29 +405,25 @@ export class Diorama {
     const h = (this.shownWater / bed.capacity) * HM;
     this.water.scale.y = h;
     this.water.position.y = WB + h / 2;
+    // トレイは水面に浮く（底が 2cm 沈む）。受けより下には下がらない
+    const ry = WB + Math.max(h, STOP * HM) + 0.015;
+    this.raft.position.y = ry;
+    // 根は槽の底を突き抜けない長さまで
+    const rootMax = ry - WB - 0.06;
     const symptom = SYMPTOM[wk][side === 'low' ? 0 : 1];
     this.seedlings.forEach((p, i) => {
       const gg = Math.max(0, Math.min(1, (g - p.delay) / (1 - p.delay)));
       const hg = (0.02 + gg * 0.55 * p.size) * pop, sw = Math.sin(t * 1.6 + p.phase) * 0.04 * (0.3 + gg);
-      du.position.set(p.x, TY + 0.08, p.z);
-      du.rotation.set(0, 0, sw);
-      du.scale.set(1, hg, 1);
-      du.updateMatrix();
-      this.stems.setMatrixAt(i, du.matrix);
+      const sz = (0.25 + gg * 1.3) * (1 - small) * pop;
+      setSeedling(du, this.stems, this.leaves, i, p.x, 0.08, p.z, hg, sz, p.phase, sw, sick * 0.6 + wilt * 0.9);
       tc.copy(C_HEALTHY).lerp(symptom, Math.min(1, ws * 1.3)).lerp(C_DEAD, Math.max(0, (1 - hp / 100) * 0.9)).offsetHSL(0, 0, (p.size - 1) * 0.08);
       this.stems.setColorAt(i, tc);
-      for (let k = 0; k < 2; k++) {
-        const a = p.phase + k * Math.PI, sz = (0.25 + gg * 1.3) * (1 - small) * pop;
-        du.position.set(p.x + Math.cos(a) * 0.06 * sz + sw * hg, TY + 0.08 + hg, p.z + Math.sin(a) * 0.06 * sz);
-        du.rotation.set(0, -a, (k ? 1 : -1) * (sick * 0.6 + wilt * 0.9));
-        du.scale.set(sz, sz * 0.28, sz * 0.85);
-        du.updateMatrix();
-        this.leaves.setMatrixAt(i * 2 + k, du.matrix);
-        this.leaves.setColorAt(i * 2 + k, tc);
-      }
-      du.position.set(p.x, TY, p.z);
+      this.leaves.setColorAt(i * 2, tc);
+      this.leaves.setColorAt(i * 2 + 1, tc);
+      // 根：芽の段階でもトレイの底から水面に届く長さにする
+      du.position.set(p.x, 0, p.z);
       du.rotation.set(0, 0, Math.sin(t * 1.2 + p.phase) * 0.05);
-      du.scale.set(1, 0.05 + gg * 0.9, 1);
+      du.scale.set(1, Math.min(rootMax, 0.08 + gg * 0.85), 1);
       du.updateMatrix();
       this.roots.setMatrixAt(i, du.matrix);
       this.roots.setColorAt(i, tc.copy(C_ROOT).lerp(C_ROOT_BAD, Math.min(1, ws * 1.3)));

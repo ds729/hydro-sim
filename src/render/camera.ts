@@ -31,7 +31,7 @@ export const PRESETS = {
   全景: { theta: Math.PI / 4, phi: ISO, fit: [...corners([[-4.7, -SLAB, -3.7], [4.7, 0, 3.7]]), [-4.7, 4.72, -3.7], [4.7, 4.72, -3.7], [-4.7, 4.72, 3.7]] },
   平面: { theta: 0, phi: 0.001, fit: corners([[-4.7, 0, -3.7], [4.7, 0, 3.7]]), cut: 2.75 },
   断面: { theta: 0, phi: 1.5, fit: corners([[-1.6, 0, -0.5], [2.8, 4.45, 2.1]]) },
-  寄り: { theta: 0.35, phi: 0.9, fit: corners([[-1.25, 1.85, -0.2], [2.45, 2.6, 1.8]]) },
+  寄り: { theta: 0.35, phi: 0.9, fit: corners([[-1.25, 1.0, -0.2], [2.45, 2.1, 1.8]]) },
   モニタ: { theta: 0, phi: 1.52, fit: corners([[-1.5, 2.85, -3.45], [1.5, 4.55, -3.3]]), cut: 2.7 },
 } satisfies Record<string, Preset>;
 export type PresetName = keyof typeof PRESETS;
