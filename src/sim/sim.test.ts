@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { applyCommand, bedOf, createSim, cropSpec, diagnose, ecOf, mulberry32, tick, type Command, type SimState } from './index';
+import { applyCommand, bedOf, createSim, CROPS, cropSpec, diagnose, ecOf, mulberry32, tick, type Command, type SimState } from './index';
 
 const fert: Command = { type: 'dose', target: 'bed', supply: 'fertilizer', amount: 10 };
 const water: Command = { type: 'dose', target: 'bed', supply: 'water', amount: 0.2 };
@@ -19,6 +19,38 @@ function keepOptimal(s: SimState) {
   if (b.water < 1.6 || (ecOf(b) > 1.4 && b.water < 2)) applyCommand(s, water);
   if (ecOf(b) < 1.0) applyCommand(s, fert);
 }
+
+/** 作物の適正帯から作る制御：各要因を適正帯の内側 2 割より中に保つ（どの作物でも同じ規則） */
+function keepInBand(s: SimState) {
+  const b = bedOf(s), { ec, ph, water: w } = cropSpec(s).bands;
+  const inner = (band: readonly number[]) => [band[1] + (band[2] - band[1]) * 0.2, band[2] - (band[2] - band[1]) * 0.2];
+  const [ecLo, ecHi] = inner(ec), [phLo, phHi] = inner(ph), [wLo, wHi] = inner(w);
+  if (b.ph > phHi) applyCommand(s, phDown);
+  if (b.ph < phLo) applyCommand(s, phUp);
+  if (b.water < wLo || (ecOf(b) > ecHi && b.water < wHi)) applyCommand(s, water);
+  if (ecOf(b) < ecLo) applyCommand(s, fert);
+}
+
+describe('作物（Phase 3）', () => {
+  test.each(Object.keys(CROPS))('%s：適正帯に保てば規定日数±5%で S 収穫', id => {
+    const s = createSim({ crop: id }), hours = cropSpec(s).days * 24;
+    let minFit = 1;
+    const r = runToEnd(s, s => { keepInBand(s); minFit = Math.min(minFit, diagnose(s).worst.value); });
+    expect(minFit).toBe(1);
+    expect(r.outcome).toBe('harvest');
+    expect(s.hour).toBeGreaterThanOrEqual(hours * 0.95);
+    expect(s.hour).toBeLessThanOrEqual(hours * 1.05);
+    expect(r.grade).toBe('S');
+  });
+
+  test.each(Object.keys(CROPS))('%s：無操作では収穫できない', id => {
+    expect(runToEnd(createSim({ crop: id })).outcome).not.toBe('harvest');
+  });
+
+  test('ない作物はエラー', () => {
+    expect(() => createSim({ crop: 'tomato' })).toThrow();
+  });
+});
 
 describe('roadmap Phase 1 の完了条件', () => {
   test('最適条件なら規定日数±5%で収穫できる', () => {

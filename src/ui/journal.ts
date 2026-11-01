@@ -1,6 +1,6 @@
 // 栽培日誌：sim のイベントを文章にする（sim 側は文言を持たない）
 
-import { HYDROPONIC, type Command, type DoseSupply, type Factor, type SimEvent } from '../sim';
+import { CROPS, HYDROPONIC, type Command, type DoseSupply, type Factor, type SimEvent } from '../sim';
 
 const DOSE: Record<DoseSupply, (amount: number) => string> = {
   fertilizer: a => `肥料を${a}mL追加（ECが上がります）`,
@@ -33,7 +33,7 @@ const ADVICE: Record<Factor, [(v: string) => string, (v: string) => string]> = {
 
 export function eventText(e: SimEvent): string {
   switch (e.kind) {
-    case 'start': return '栽培開始。EC・pH・液量を適正帯（緑）に保とう。';
+    case 'start': return `${CROPS[e.crop].name}の栽培開始。EC・pH・液量を適正帯（緑）に保とう。${CROPS[e.crop].note}`;
     case 'command': return commandText(e.command);
     case 'morning':
       return `朝の記録：EC ${e.ec.toFixed(1)}、pH ${e.ph.toFixed(1)}、液量 ${e.water.toFixed(1)}L、生育 ${Math.round(e.growth * 100)}%`;

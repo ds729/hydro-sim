@@ -1,12 +1,12 @@
 // 画面の組み立てとメインループ。sim は固定タイムステップ（1 tick ＝ 1時間）で進め、描画は毎フレーム
 
 import './ui/style.css';
-import { applyCommand, createSim, cropSpec, tick, type Command, type SimState } from './sim';
+import { applyCommand, createSim, CROPS, cropSpec, tick, type Command, type SimState } from './sim';
 import { PRESETS, type PresetName } from './render/camera';
 import { modelStatus } from './render/models';
 import { View, type Quality } from './render/view';
 import { Hud } from './ui/hud';
-import { showResult } from './ui/result';
+import { shortName, showResult } from './ui/result';
 import { mountQuality } from './ui/quality';
 import { mountTools } from './ui/tools';
 
@@ -31,11 +31,32 @@ function send(c: Command) {
   if (applyCommand(s, c)) dirty = true;
 }
 
-function restart() {
-  s = createSim();
+/** 始め直す。作物を省くと今の作物のまま */
+function restart(crop = s.crop.id) {
+  s = createSim({ crop });
+  hud.setCrop(cropSpec(s));
+  markCrop();
   resultShown = false;
   dirty = true;
 }
+
+// 作物の選択（☰ の中）。育てている途中で変えるときは確かめる
+const cropBtns = Object.entries(CROPS).map(([id, c]) => {
+  const b = document.createElement('button');
+  b.textContent = shortName(c.name);
+  b.title = c.note;
+  b.onclick = () => {
+    if (id === s.crop.id) return;
+    if (s.hour > 0 && !s.result && !confirm(`${shortName(c.name)}に変えて、最初から育て直しますか？`)) return;
+    restart(id);
+  };
+  $('cr').appendChild(b);
+  return [id, b] as const;
+});
+function markCrop() {
+  for (const [id, b] of cropBtns) b.classList.toggle('on', id === s.crop.id);
+}
+markCrop();
 
 // 画面サイズ・パネル位置から、3D がパネルに隠れない領域を決めてカメラを合わせ直す
 function layout() {
@@ -104,7 +125,7 @@ function loop(now: number) {
   }
   sinceHud += dt;
   if (dirty || sinceHud > 0.1) { hud.update(s); dirty = false; sinceHud = 0; }
-  if (s.result && !resultShown) { resultShown = true; showResult(s.result, restart); }
+  if (s.result && !resultShown) { resultShown = true; showResult(s.result, s.crop.id, restart); }
   view.frame(s, now / 1000);
   frames++;
   if (now - fpsAt >= 1000) {
@@ -124,6 +145,7 @@ Object.assign(window, {
     /** n 時間進める（速度とは無関係に即時） */
     tick(n = 1) { for (let i = 0; i < n && !s.result; i++) tick(s); dirty = true; },
     send,
+    /** 始め直す（作物 id を渡すとその作物で。確認なし） */
     restart,
     setSpeed(v: number) { speed = v; },
     camera(name: PresetName, instant = true) { view.rig.goTo(name, instant); },

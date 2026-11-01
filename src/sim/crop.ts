@@ -10,6 +10,8 @@ export type Factor = (typeof FACTORS)[number];
 
 export interface CropSpec {
   name: string;
+  /** 作物を選ぶときの一言（育て方の要点） */
+  note: string;
   /** 最適条件で収穫できるまでの日数 */
   days: number;
   /** once：1回収穫、repeat：連続収穫（葉物。Phase 3 以降） */
@@ -30,6 +32,8 @@ export interface CropSpec {
   /** 最適条件・健康度 100 での収量 g */
   yieldG: number;
   pricePer100g: number;
+  /** 見た目（描画層が使う。sim は使わない）。色は '#rrggbb'、大きさは基準（ラディッシュ）に対する倍率 */
+  look: { stem: string; leaf: string; height: number; leafSize: number; stemWidth: number };
 }
 
 // JSON の配列は TS ではタプルにならないので unknown を経由する。中身は crop.test.ts で検査する

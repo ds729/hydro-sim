@@ -20,7 +20,7 @@ export const HYDROPONIC: Setup = {
 };
 
 export type SimEvent =
-  | { hour: number; kind: 'start' }
+  | { hour: number; kind: 'start'; crop: string }
   | { hour: number; kind: 'command'; command: Command }
   /** 毎朝（24時間ごと）の定点記録 */
   | { hour: number; kind: 'morning'; ec: number; ph: number; water: number; growth: number }
@@ -76,7 +76,7 @@ export function createSim(opts: { crop?: string; seed?: number; setup?: Setup } 
   return {
     setup, hour: 0, rng: (opts.seed ?? 1) >>> 0, compartments, flows: setup.flows.map(f => ({ ...f })),
     crop: { id, compartment: setup.bed, growth: 0, health: 100, qualitySum: 0 },
-    cost: 0, history: [], log: [{ hour: 0, kind: 'start' }],
+    cost: 0, history: [], log: [{ hour: 0, kind: 'start', crop: id }],
     watch: { ec: { low: 0, last: null }, ph: { low: 0, last: null }, water: { low: 0, last: null } },
     result: null,
   };

@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { bedOf, diagnose, mulberry32, type Factor, type SimState } from '../sim';
+import { bedOf, cropSpec, diagnose, mulberry32, type Factor, type SimState } from '../sim';
 import { bakedShadow, boxSet, Builder, LED, mat, SLAB, type BoxSpec } from './build';
 import { loadModel } from './models';
 import { Monitor } from './monitor';
@@ -23,13 +23,13 @@ const LEAF_GEO = new THREE.IcosahedronGeometry(0.075, 1), LEAF_GEO_LOW = new THR
 
 /**
  * 苗1本（茎1本＋子葉2枚）の行列を stems の i 番、leaves の 2i・2i+1 番に入れる。
- * y は茎の根元、hg は茎の高さ、sz は子葉の大きさ、a は子葉の向き、sw は揺れ、tilt は子葉の垂れ
+ * y は茎の根元、hg は茎の高さ、sz は子葉の大きさ、a は子葉の向き、sw は揺れ、tilt は子葉の垂れ、wd は茎の太さの倍率
  */
 function setSeedling(du: THREE.Object3D, stems: THREE.InstancedMesh, leaves: THREE.InstancedMesh, i: number,
-  x: number, y: number, z: number, hg: number, sz: number, a: number, sw: number, tilt: number) {
+  x: number, y: number, z: number, hg: number, sz: number, a: number, sw: number, tilt: number, wd = 1) {
   du.position.set(x, y, z);
   du.rotation.set(0, 0, sw);
-  du.scale.set(1, hg, 1);
+  du.scale.set(wd, hg, wd);
   du.updateMatrix();
   stems.setMatrixAt(i, du.matrix);
   for (let k = 0; k < 2; k++) {
@@ -95,6 +95,9 @@ export class Diorama {
   private seedlings: Seedling[] = [];
   private dummy = new THREE.Object3D();
   private color = new THREE.Color();
+  /** 作物の健康な茎・葉の色（update で crops.json の look から入れる） */
+  private stemColor = new THREE.Color();
+  private leafColor = new THREE.Color();
   /** 表示中の液量（実際の値に滑らかに追従させる） */
   private shownWater = 2;
   /** 生育段階（4段階）が変わった時刻。苗が弾む演出に使う */
@@ -392,6 +395,8 @@ export class Diorama {
   update(s: SimState, t: number): void {
     const dg = diagnose(s), f = dg.fitness, { key: wk, side } = dg.worst, ws = 1 - dg.worst.value;
     const hp = s.crop.health, g = s.crop.growth, du = this.dummy, tc = this.color;
+    // 作物ごとの形と色（crops.json の look）。症状の色はこの健康な色から寄せる
+    const look = cropSpec(s).look, cs = this.stemColor.set(look.stem), cl = this.leafColor.set(look.leaf);
     const sick = Math.min(1, 1 - hp / 100 + ws * 0.4);
     const wilt = wk === 'water' && side === 'low' ? ws : 0;
     const small = wk === 'ec' && side === 'high' ? ws * 0.35 : 0;
@@ -411,11 +416,13 @@ export class Diorama {
     const symptom = SYMPTOM[wk][side === 'low' ? 0 : 1];
     this.seedlings.forEach((p, i) => {
       const gg = Math.max(0, Math.min(1, (g - p.delay) / (1 - p.delay)));
-      const hg = (0.02 + gg * 0.55 * p.size) * pop, sw = Math.sin(t * 1.6 + p.phase) * 0.04 * (0.3 + gg);
-      const sz = (0.25 + gg * 1.3) * (1 - small) * pop;
-      setSeedling(du, this.stems, this.leaves, i, p.x, 0.08, p.z, hg, sz, p.phase, sw, sick * 0.6 + wilt * 0.9);
-      tc.copy(C_HEALTHY).lerp(symptom, Math.min(1, ws * 1.3)).lerp(C_DEAD, Math.max(0, (1 - hp / 100) * 0.9)).offsetHSL(0, 0, (p.size - 1) * 0.08);
-      this.stems.setColorAt(i, tc);
+      const hg = (0.02 + gg * 0.55 * p.size * look.height) * pop, sw = Math.sin(t * 1.6 + p.phase) * 0.04 * (0.3 + gg);
+      const sz = (0.25 + gg * 1.3 * look.leafSize) * (1 - small) * pop;
+      setSeedling(du, this.stems, this.leaves, i, p.x, 0.08, p.z, hg, sz, p.phase, sw, sick * 0.6 + wilt * 0.9, look.stemWidth);
+      const tint = (c: THREE.Color) =>
+        tc.copy(c).lerp(symptom, Math.min(1, ws * 1.3)).lerp(C_DEAD, Math.max(0, (1 - hp / 100) * 0.9)).offsetHSL(0, 0, (p.size - 1) * 0.08);
+      this.stems.setColorAt(i, tint(cs));
+      tint(cl);
       this.leaves.setColorAt(i * 2, tc);
       this.leaves.setColorAt(i * 2 + 1, tc);
       // 根：芽の段階でもトレイの底から水面に届く長さにする

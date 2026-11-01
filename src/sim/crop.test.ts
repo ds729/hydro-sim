@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { CROPS, FACTORS } from './crop';
 import { limiting, side, trapezoid } from './fitness';
 
-test('crops.json：各要因の帯は4つの昇順の数', () => {
+test('crops.json：各要因の帯は4つの昇順の数、一言と見た目がある', () => {
   for (const [id, c] of Object.entries(CROPS)) {
     for (const k of FACTORS) {
       const b = c.bands[k];
@@ -11,6 +11,9 @@ test('crops.json：各要因の帯は4つの昇順の数', () => {
     }
     expect(c.days).toBeGreaterThan(0);
     expect(c.uptake.activity).toHaveLength(2);
+    expect(c.note, id).toBeTruthy();
+    for (const k of ['stem', 'leaf'] as const) expect(c.look[k], `${id}.look.${k}`).toMatch(/^#[0-9a-f]{6}$/);
+    for (const k of ['height', 'leafSize', 'stemWidth'] as const) expect(c.look[k], `${id}.look.${k}`).toBeGreaterThan(0);
   }
 });
 

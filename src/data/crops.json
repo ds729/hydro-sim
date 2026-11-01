@@ -1,6 +1,7 @@
 {
   "radish": {
     "name": "ラディッシュ（マイクログリーン）",
+    "note": "育ちが早く、辛みのある子葉。基本の作物。",
     "days": 8,
     "harvest": "once",
     "bands": {
@@ -15,6 +16,67 @@
       "phDriftPerH": 0.01
     },
     "yieldG": 80,
-    "pricePer100g": 1200
+    "pricePer100g": 1200,
+    "look": { "stem": "#c9e8a8", "leaf": "#6fd06a", "height": 1, "leafSize": 1, "stemWidth": 1 }
+  },
+  "broccoli": {
+    "name": "ブロッコリー（マイクログリーン）",
+    "note": "単価は高いが、pH の適正帯が狭い。こまめに測ろう。",
+    "days": 10,
+    "harvest": "once",
+    "bands": {
+      "ec": [0.4, 1.0, 1.8, 2.6],
+      "ph": [5.2, 6.0, 6.6, 7.2],
+      "water": [0.4, 1.2, 2.2, 2.8]
+    },
+    "uptake": {
+      "waterLph": 0.005,
+      "activity": [0.3, 0.7],
+      "saltRatio": 0.6,
+      "phDriftPerH": 0.012
+    },
+    "yieldG": 60,
+    "pricePer100g": 1800,
+    "look": { "stem": "#dfe9cf", "leaf": "#4f9e64", "height": 0.8, "leafSize": 0.9, "stemWidth": 0.85 }
+  },
+  "sunflower": {
+    "name": "ひまわり（マイクログリーン）",
+    "note": "大きい種の養分で育つので肥料は控えめに。よく水を吸う。",
+    "days": 10,
+    "harvest": "once",
+    "bands": {
+      "ec": [0.1, 0.4, 1.2, 2.0],
+      "ph": [5.0, 5.8, 6.8, 7.6],
+      "water": [0.6, 1.4, 2.4, 2.9]
+    },
+    "uptake": {
+      "waterLph": 0.009,
+      "activity": [0.3, 0.7],
+      "saltRatio": 0.4,
+      "phDriftPerH": 0.008
+    },
+    "yieldG": 120,
+    "pricePer100g": 700,
+    "look": { "stem": "#eef0dc", "leaf": "#64bc4c", "height": 1.15, "leafSize": 1.45, "stemWidth": 1.5 }
+  },
+  "pea": {
+    "name": "豆苗（エンドウ）",
+    "note": "背が高く、種の養分で育つので肥料は控えめに。単価は安い。",
+    "days": 10,
+    "harvest": "once",
+    "bands": {
+      "ec": [0.1, 0.3, 1.2, 2.0],
+      "ph": [5.2, 6.0, 7.0, 7.6],
+      "water": [0.6, 1.4, 2.4, 2.9]
+    },
+    "uptake": {
+      "waterLph": 0.008,
+      "activity": [0.3, 0.7],
+      "saltRatio": 0.5,
+      "phDriftPerH": 0.008
+    },
+    "yieldG": 120,
+    "pricePer100g": 400,
+    "look": { "stem": "#a8d884", "leaf": "#4fae4a", "height": 1.6, "leafSize": 0.7, "stemWidth": 0.9 }
   }
 }

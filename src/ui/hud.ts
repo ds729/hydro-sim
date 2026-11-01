@@ -13,6 +13,12 @@ export class Hud {
   private lastEvent: SimEvent | undefined;
 
   constructor(spec: CropSpec, private onAdvice: () => void) {
+    this.setCrop(spec);
+  }
+
+  /** 作物の名前とゲージ（適正帯の色）を作り直す。作物を変えて始め直すときにも呼ぶ */
+  setCrop(spec: CropSpec): void {
+    this.lastEvent = undefined;
     $('cn').textContent = spec.name;
     $('gs').innerHTML = GAUGES.map(([k, label]) =>
       `<div class="row"><b>${label}</b><span id="v${k}"></span><div class="tr" id="t${k}"><div class="mk" id="m${k}"></div></div></div>`).join('');
