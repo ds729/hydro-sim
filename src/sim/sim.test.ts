@@ -84,13 +84,14 @@ describe('roadmap Phase 1 の完了条件', () => {
     expect(runToEnd(s).outcome).toBe('dead');
   });
 
-  test('6時間ごとに肥料を入れると EC 過多で、v0.4.1 と同じく Day 5 に枯死する', () => {
+  // v0.4.1 では 103 時間（Day 5）・540 円。2026-11-02 の裏取りで EC の適正帯を広げたので延びた
+  test('6時間ごとに肥料を入れると EC 過多で Day 5 に枯死する', () => {
     const s = createSim();
     const r = runToEnd(s, s => { if (s.hour % 6 === 0) applyCommand(s, fert); });
     expect(r.outcome).toBe('dead');
-    expect(s.hour).toBe(103);
-    expect(r.cost).toBe(540);
-    expect(r.profit).toBe(-540);
+    expect(s.hour).toBe(117);
+    expect(r.cost).toBe(600);
+    expect(r.profit).toBe(-600);
   });
 });
 
