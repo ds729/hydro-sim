@@ -6,6 +6,7 @@ import {
 } from '../sim';
 import { shortName } from './result';
 import { symptomOf } from './symptoms';
+import { markSeen } from './zukan';
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -71,6 +72,7 @@ export class QuizPanel {
 
   private reveal() {
     const z = this.quiz!, q = z.questions[z.index], a = z.answers[z.index]!, sy = symptomOf(q.cause);
+    markSeen('symptoms', causeKey(q.cause));
     const right = causeKey(a) === causeKey(q.cause), { values } = diagnose(this.current!), bands = CROPS[q.crop].bands;
     for (const [k, b] of this.buttons) {
       b.disabled = true;
@@ -79,7 +81,7 @@ export class QuizPanel {
     }
     const readings = READINGS.map(([k, label, unit, d]) => {
       const t = `${label} ${values[k].toFixed(d)}${unit}`, b = bands[k];
-      return k === q.cause.factor ? `<b class="qo">${t}（適正 ${b[1]}〜${b[2]}${unit}）</b>` : t;
+      return k === q.cause.factor ? `<b class="qo">${t}（適正 ${b[1].toFixed(1)}〜${b[2].toFixed(1)}${unit}）</b>` : t;
     }).join('・');
     const last = z.index === z.questions.length - 1;
     $('qz').innerHTML = `<div class="qr ${right ? 'ok' : 'ng'}">${right ? '⭕ 正解！' : `❌ 残念（あなたの答え：${symptomOf(a).label}）`}</div>`

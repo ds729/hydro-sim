@@ -12,7 +12,7 @@ export class Hud {
   /** 日誌の最新の記録（変わったときだけ日誌を描き直す） */
   private lastEvent: SimEvent | undefined;
 
-  constructor(spec: CropSpec, private onAdvice: () => void) {
+  constructor(spec: CropSpec, private onAdvice: (e: Extract<SimEvent, { kind: 'advice' }>) => void) {
     this.setCrop(spec);
   }
 
@@ -41,8 +41,11 @@ export class Hud {
     const last = s.log.at(-1);
     if (last !== this.lastEvent) {
       this.lastEvent = last;
-      if (last?.kind === 'advice') this.onAdvice();
-      $('jl').innerHTML = journalHtml(s.log);
+      if (last?.kind === 'advice') this.onAdvice(last);
+      // 開いている「なぜ？」は描き直しても開いたままにする
+      const jl = $('jl'), open = new Set([...jl.querySelectorAll<HTMLDetailsElement>('details[open]')].map(d => d.dataset.k));
+      jl.innerHTML = journalHtml(s.log, spec);
+      for (const d of jl.querySelectorAll<HTMLDetailsElement>('details')) d.open = open.has(d.dataset.k);
     }
     this.chart(s, spec);
   }

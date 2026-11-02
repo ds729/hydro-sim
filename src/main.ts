@@ -10,6 +10,7 @@ import { shortName, showResult } from './ui/result';
 import { mountQuality } from './ui/quality';
 import { mountTools } from './ui/tools';
 import { QuizPanel } from './ui/quiz';
+import { markSeen, openZukan } from './ui/zukan';
 
 const $ = (id: string) => document.getElementById(id)!;
 const app = $('app'), menu = $('mb');
@@ -26,7 +27,12 @@ let dirty = true;
 let resultShown = false;
 
 const view = new View($('cv') as HTMLCanvasElement);
-const hud = new Hud(cropSpec(s), () => { if (!app.classList.contains('so')) menu.classList.add('nw'); });
+const hud = new Hud(cropSpec(s), e => {
+  markSeen('symptoms', `${e.factor}.${e.side}`);
+  if (!app.classList.contains('so')) menu.classList.add('nw');
+});
+markSeen('crops', s.crop.id);
+$('zo').onclick = () => openZukan();
 
 /** 症状診断モード。診断中は栽培を止め、栽培の状態はそのまま残す */
 const quiz = new QuizPanel(() => setMode('grow'));
@@ -60,6 +66,7 @@ const modeBtns = ([['grow', '栽培'], ['quiz', '症状診断']] as const).map((
 /** 始め直す。作物を省くと今の作物のまま */
 function restart(crop = s.crop.id) {
   s = createSim({ crop });
+  markSeen('crops', crop);
   hud.setCrop(cropSpec(s));
   markCrop();
   resultShown = false;
@@ -181,6 +188,8 @@ Object.assign(window, {
     renderInfo() { return { ...view.renderer.info.render }; },
     /** 症状診断モード：mode('quiz', seed) で始める。quiz.answer({factor:'ec',side:'high'})・quiz.next() で進める */
     mode: setMode,
+    /** 図鑑を開く（'crops' / 'symptoms'） */
+    zukan: openZukan,
     quiz,
     /** 直近1秒の平均 fps */
     get fps() { return fps; },

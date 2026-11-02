@@ -1,6 +1,6 @@
 // シミュレーション本体。固定タイムステップ（1 tick ＝ 1時間）、状態はプレーンなデータ（複製・保存・比較できる）
 
-import { execute, type Command } from './commands';
+import { execute, SUPPLIES, type Command, type DoseSupply } from './commands';
 import { applyFlows, ecOf, fill, findCompartment, type Compartment, type Flow, type Solution } from './compartment';
 import { CROPS, FACTORS, MEASURE, exchange, fitness, grow, type CropState, type Factor } from './crop';
 import { limiting, side } from './fitness';
@@ -24,8 +24,14 @@ export type SimEvent =
   | { hour: number; kind: 'command'; command: Command }
   /** 毎朝（24時間ごと）の定点記録 */
   | { hour: number; kind: 'morning'; ec: number; ph: number; water: number; growth: number }
-  /** 観察メモ：要因が適正帯から外れ続けたときの原因と対処 */
-  | { hour: number; kind: 'advice'; factor: Factor; side: 'low' | 'high'; value: number };
+  /**
+   * 観察メモ：要因が適正帯から外れ続けた。fit はその要因の適合度（律速なら成長の速さ）。
+   * driver は外れた向きに動かした操作（最後に適正だった時刻より後。null なら作物の吸収など自然な変化）、driverHour はその時刻
+   */
+  | {
+    hour: number; kind: 'advice'; factor: Factor; side: 'low' | 'high'; value: number;
+    fit: number; driver: DoseSupply | null; driverHour: number | null;
+  };
 
 export type Grade = 'S' | 'A' | 'B' | 'C';
 
@@ -38,6 +44,8 @@ export interface Result {
   sales: number;
   cost: number;
   profit: number;
+  /** 品質を下げた原因：`${要因}.${low|high}` ごとの品質の低下分（合計 ＝ 1 − 品質）。大きい順 */
+  losses: { key: string; value: number }[];
 }
 
 export interface SimState {
@@ -54,13 +62,17 @@ export interface SimState {
   /** 2時間ごとの記録（グラフ用） */
   history: { ec: number; ph: number }[];
   log: SimEvent[];
-  /** 観察メモの判定：適合度 0.7 未満が続いた時間と、最後にメモを出した時刻 */
-  watch: Record<Factor, { low: number; last: number | null }>;
+  /** 観察メモの判定：適合度 0.7 未満が続いた時間、最後にメモを出した時刻、最後に適正（適合度 0.9 以上）だった時刻 */
+  watch: Record<Factor, { low: number; last: number | null; okAt: number }>;
+  /** 律速因子ごとの (1 − 適合度) の累計。キーは `${要因}.${low|high}`（品質を下げた原因の内訳） */
+  loss: Record<string, number>;
   result: Result | null;
 }
 
 /** 適合度 0.7 未満がこの時間続いたら観察メモを出す。同じ要因は 24 時間あける */
 const WATCH_LOW = 0.7, WATCH_HOURS = 3, WATCH_INTERVAL = 24;
+/** この適合度以上なら「適正」とみなす（観察メモの原因は、最後に適正だった時刻より後の操作から探す） */
+const WATCH_OK = 0.9;
 
 const GRADES: [number, Grade, number][] = [[0.95, 'S', 1.2], [0.85, 'A', 1], [0.7, 'B', 0.7], [-Infinity, 'C', 0.4]];
 
@@ -77,7 +89,8 @@ export function createSim(opts: { crop?: string; seed?: number; setup?: Setup } 
     setup, hour: 0, rng: (opts.seed ?? 1) >>> 0, compartments, flows: setup.flows.map(f => ({ ...f })),
     crop: { id, compartment: setup.bed, growth: 0, health: 100, qualitySum: 0 },
     cost: 0, history: [], log: [{ hour: 0, kind: 'start', crop: id }],
-    watch: { ec: { low: 0, last: null }, ph: { low: 0, last: null }, water: { low: 0, last: null } },
+    watch: { ec: { low: 0, last: null, okAt: 0 }, ph: { low: 0, last: null, okAt: 0 }, water: { low: 0, last: null, okAt: 0 } },
+    loss: {},
     result: null,
   };
 }
@@ -93,8 +106,12 @@ export function tick(s: SimState): void {
   const spec = cropSpec(s), bed = bedOf(s);
   applyFlows(s.compartments, s.flows);
   exchange(s.crop, spec, bed);
-  const f = fitness(spec, bed);
-  grow(s.crop, spec, limiting(FACTORS, f).value);
+  const f = fitness(spec, bed), lim = limiting(FACTORS, f);
+  grow(s.crop, spec, lim.value);
+  if (lim.value < 1) {
+    const k = `${lim.key}.${side(MEASURE[lim.key](bed), spec.bands[lim.key])}`;
+    s.loss[k] = (s.loss[k] ?? 0) + 1 - lim.value;
+  }
   s.hour++;
   if (s.hour % 24 === 0) {
     s.log.push({ hour: s.hour, kind: 'morning', ec: ecOf(bed), ph: bed.ph, water: bed.water, growth: s.crop.growth });
@@ -102,10 +119,11 @@ export function tick(s: SimState): void {
   for (const k of FACTORS) {
     const w = s.watch[k];
     w.low = f[k] < WATCH_LOW ? w.low + 1 : 0;
+    if (f[k] >= WATCH_OK) w.okAt = s.hour;
     if (w.low >= WATCH_HOURS && s.hour - (w.last ?? -99) >= WATCH_INTERVAL) {
       w.last = s.hour;
-      const v = MEASURE[k](bed);
-      s.log.push({ hour: s.hour, kind: 'advice', factor: k, side: side(v, spec.bands[k]), value: v });
+      const v = MEASURE[k](bed), sd = side(v, spec.bands[k]), d = driverOf(s, k, sd);
+      s.log.push({ hour: s.hour, kind: 'advice', factor: k, side: sd, value: v, fit: f[k], driver: d?.supply ?? null, driverHour: d?.hour ?? null });
     }
   }
   if (s.hour % 2 === 0) s.history.push({ ec: ecOf(bed), ph: bed.ph });
@@ -129,7 +147,29 @@ function finish(s: SimState, outcome: Result['outcome']): void {
   const [, grade, mult] = GRADES.find(([min]) => q >= min)!;
   const yieldG = outcome === 'harvest' ? spec.yieldG * Math.sqrt(Math.max(0, s.crop.health) / 100) * q : 0;
   const sales = (yieldG / 100) * spec.pricePer100g * mult;
-  s.result = { outcome, quality: q, grade, yieldG, sales, cost: s.cost, profit: sales - s.cost };
+  const losses = Object.entries(s.loss).map(([key, v]) => ({ key, value: v / s.hour })).sort((a, b) => b.value - a.value);
+  s.result = { outcome, quality: q, grade, yieldG, sales, cost: s.cost, profit: sales - s.cost, losses };
+}
+
+/** 資材が要因を動かす向き（+1 上げる、−1 下げる、0 動かさない）。EC は塩類で上がり、水で薄まる */
+function pushOf(supply: DoseSupply, k: Factor): number {
+  const e = SUPPLIES[supply].perUnit;
+  if (k === 'ec') return Math.sign(e.salts ?? 0) || -Math.sign(e.water ?? 0);
+  return Math.sign((k === 'ph' ? e.ph : e.water) ?? 0);
+}
+
+/**
+ * 要因を外れた向きに動かした直近の操作（なければ null ＝ 作物の吸収など自然な変化）。
+ * さかのぼるのは、その要因が最後に適正だった時刻（その時刻の操作は含む）か、最後の全交換まで
+ */
+function driverOf(s: SimState, k: Factor, sd: 'low' | 'high'): { supply: DoseSupply; hour: number } | null {
+  const want = sd === 'high' ? 1 : -1, from = s.watch[k].okAt;
+  for (let i = s.log.length - 1; i >= 0; i--) {
+    const e = s.log[i];
+    if (e.hour < from || (e.kind === 'command' && e.command.type === 'replaceSolution')) break;
+    if (e.kind === 'command' && e.command.type === 'dose' && pushOf(e.command.supply, k) === want) return { supply: e.command.supply, hour: e.hour };
+  }
+  return null;
 }
 
 export interface Diagnosis {

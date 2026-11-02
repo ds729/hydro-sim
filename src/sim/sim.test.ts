@@ -142,6 +142,46 @@ describe('記録', () => {
     expect(s.history).toHaveLength(12);
   });
 
+  test('観察メモの原因：直近の操作が外れた向きに動かしていればその資材、なければ自然な変化（null）', () => {
+    const s = createSim();
+    for (let i = 0; i < 10; i++) applyCommand(s, phUp);
+    for (let i = 0; i < 4; i++) tick(s);
+    expect(s.log.find(e => e.kind === 'advice')).toMatchObject({ factor: 'ph', side: 'high', driver: 'phUp', driverHour: 0 });
+
+    // 適正なうちに入れた操作は原因にしない（pHアップで適正帯の中で上げ、その後の自然な上昇で外れる）
+    const t = createSim();
+    applyCommand(t, phUp);
+    for (let i = 0; i < 200 && !t.log.some(e => e.kind === 'advice'); i++) tick(t);
+    const a = t.log.find(e => e.kind === 'advice')!;
+    expect(a).toMatchObject({ factor: 'ph', side: 'high', driver: null });
+    expect(a.hour).toBeGreaterThan(24);
+
+    // 外れたままなら、24 時間後のメモも同じ操作を原因にする
+    const v = createSim();
+    for (let i = 0; i < 8; i++) applyCommand(v, fert);
+    for (let i = 0; i < 30; i++) tick(v);
+    expect(v.log.filter(e => e.kind === 'advice' && e.factor === 'ec').map(e => e.kind === 'advice' && [e.hour, e.driver]))
+      .toEqual([[3, 'fertilizer'], [27, 'fertilizer']]);
+
+    // 全交換より前の操作は原因にしない
+    const u = createSim();
+    for (let i = 0; i < 10; i++) applyCommand(u, phUp);
+    applyCommand(u, { type: 'replaceSolution', target: 'bed' });
+    for (let i = 0; i < 200 && !u.log.some(e => e.kind === 'advice'); i++) tick(u);
+    expect(u.log.find(e => e.kind === 'advice')).toMatchObject({ driver: null });
+  });
+
+  test('観察メモに適合度が付き、結果に品質を下げた原因の内訳（合計 ＝ 1 − 品質）が出る', () => {
+    const s = createSim();
+    const r = runToEnd(s, s => { if (s.hour % 6 === 0) applyCommand(s, fert); });
+    const adv = s.log.find(e => e.kind === 'advice');
+    expect(adv).toMatchObject({ factor: 'ec', side: 'high', driver: 'fertilizer' });
+    if (adv?.kind === 'advice') expect(adv.fit).toBeLessThan(0.7);
+    expect(r.losses[0].key).toBe('ec.high');
+    expect(r.losses.reduce((a, l) => a + l.value, 0)).toBeCloseTo(1 - r.quality, 10);
+    for (let i = 1; i < r.losses.length; i++) expect(r.losses[i].value).toBeLessThanOrEqual(r.losses[i - 1].value);
+  });
+
   test('同じシードと操作なら同じ経過になる（状態はプレーンなデータ）', () => {
     const play = (seed: number) => {
       const s = createSim({ seed }), r = mulberry32(seed), cmds = [fert, water, phDown, phUp];

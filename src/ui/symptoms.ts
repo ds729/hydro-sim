@@ -11,6 +11,8 @@ export interface Symptom {
   icon: string;
   /** 見た目の特徴 */
   look: string;
+  /** 操作によらず自然に起きたときの原因（観察メモで、直近の操作が原因でないときに出す） */
+  natural: string;
   /** 原因から見た目に至る理由 */
   why: string;
   /** 対処 */

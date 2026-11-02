@@ -1,6 +1,17 @@
 // 結果画面（収穫・枯死・時間切れ）
 
 import { CROPS, type Result } from '../sim';
+import { SYMPTOMS } from './symptoms';
+
+/** 品質を下げた原因（品質の低下分が 1% 以上のものを大きい順に3つまで） */
+function lossHtml(r: Result): string {
+  const top = r.losses.filter(l => l.value >= 0.01).slice(0, 3);
+  if (!top.length) return '<div class="ls"><b>品質を下げた原因</b>なし。ずっと適正帯に保てました。</div>';
+  return '<div class="ls"><b>品質を下げた原因</b>' + top.map(l => {
+    const sy = SYMPTOMS[l.key];
+    return `${sy.icon} ${sy.label}（${sy.name}） −${(l.value * 100).toFixed(0)}%`;
+  }).join('<br>') + '</div>';
+}
 
 const TITLE: Record<Result['outcome'], (r: Result) => [string, string]> = {
   harvest: r => ['収穫できました', `等級 ${r.grade}（品質 ${(r.quality * 100).toFixed(0)}%）`],
@@ -11,7 +22,7 @@ const TITLE: Record<Result['outcome'], (r: Result) => [string, string]> = {
 /** 結果を出す。onRestart には次に育てる作物を渡す（「もう一度」は同じ作物、下の段で別の作物） */
 export function showResult(r: Result, crop: string, onRestart: (crop: string) => void): void {
   const box = document.getElementById('res')!, [title, sub] = TITLE[r.outcome](r);
-  document.getElementById('rb')!.innerHTML = `<h2>${title}</h2><div>${sub}</div><table>`
+  document.getElementById('rb')!.innerHTML = `<h2>${title}</h2><div>${sub}</div>${lossHtml(r)}<table>`
     + `<tr><td>収量</td><td>${r.yieldG.toFixed(0)} g</td></tr><tr><td>売上</td><td>¥${r.sales.toFixed(0)}</td></tr>`
     + `<tr><td>資材費</td><td>¥${r.cost}</td></tr><tr><td><b>利益</b></td><td><b>¥${r.profit.toFixed(0)}</b></td></tr>`
     + `</table><button data-crop="${crop}" style="width:100%">もう一度育てる</button>`
