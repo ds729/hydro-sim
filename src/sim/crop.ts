@@ -6,6 +6,10 @@ import { ecOf, type Compartment } from './compartment';
 import { trapezoid, type Band } from './fitness';
 
 export const FACTORS = ['ec', 'ph', 'water'] as const;
+
+/** 葉の形（描画層 render/seedling.ts の形の名前）。heart＝かいわれ型の子葉、oval＝厚い楕円の子葉、pea＝小葉2段と巻きひげ */
+export const LEAF_SHAPES = ['heart', 'oval', 'pea'] as const;
+export type LeafShape = (typeof LEAF_SHAPES)[number];
 export type Factor = (typeof FACTORS)[number];
 
 export interface CropSpec {
@@ -33,7 +37,7 @@ export interface CropSpec {
   yieldG: number;
   pricePer100g: number;
   /** 見た目（描画層が使う。sim は使わない）。色は '#rrggbb'、大きさは基準（ラディッシュ）に対する倍率 */
-  look: { stem: string; leaf: string; height: number; leafSize: number; stemWidth: number };
+  look: { leafShape: LeafShape; stem: string; leaf: string; height: number; leafSize: number; stemWidth: number };
 }
 
 // JSON の配列は TS ではタプルにならないので unknown を経由する。中身は crop.test.ts で検査する

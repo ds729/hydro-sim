@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { CROPS, FACTORS } from './crop';
+import { CROPS, FACTORS, LEAF_SHAPES } from './crop';
 import { limiting, side, trapezoid } from './fitness';
 
 test('crops.json：各要因の帯は4つの昇順の数、一言と見た目がある', () => {
@@ -13,6 +13,7 @@ test('crops.json：各要因の帯は4つの昇順の数、一言と見た目が
     expect(c.uptake.activity).toHaveLength(2);
     expect(c.note, id).toBeTruthy();
     for (const k of ['stem', 'leaf'] as const) expect(c.look[k], `${id}.look.${k}`).toMatch(/^#[0-9a-f]{6}$/);
+    expect(LEAF_SHAPES, `${id}.look.leafShape`).toContain(c.look.leafShape);
     for (const k of ['height', 'leafSize', 'stemWidth'] as const) expect(c.look[k], `${id}.look.${k}`).toBeGreaterThan(0);
   }
 });

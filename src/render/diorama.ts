@@ -3,10 +3,11 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { bedOf, cropSpec, diagnose, mulberry32, type Factor, type SimState } from '../sim';
+import { bedOf, cropSpec, diagnose, mulberry32, type CropSpec, type Factor, type SimState } from '../sim';
 import { bakedShadow, boxSet, Builder, LED, mat, SLAB, type BoxSpec } from './build';
 import { loadModel } from './models';
 import { Monitor } from './monitor';
+import { Seedlings } from './seedling';
 
 /** 栽培槽：幅・奥行き・水位の最大高さ・底板の上面 */
 const W = 4, D = 2.4, HM = 1.45, WB = 0.23;
@@ -14,33 +15,10 @@ const W = 4, D = 2.4, HM = 1.45, WB = 0.23;
 const STOP = 0.4;
 /** 苗の並び */
 const NX = 14, NZ = 8, N = NX * NZ;
+/** 補助ラックの苗の茎の高さの上限（マットの上面から上の棚の LED まで約 0.55m。葉の分を引く） */
+const RACK_PLANT_MAX = 0.4;
 /** EC・pH センサのプローブ（栽培槽の中の x と z、頭の高さ） */
 const PROBE_X = 1.88, PROBE_Z = [-0.9, 0.9], PROBE_TOP = 2.05;
-
-/** 苗の形（栽培槽と補助ラックで共有し、縮尺を揃える） */
-const STEM_GEO = new THREE.CylinderGeometry(0.014, 0.02, 1, 5).translate(0, 0.5, 0);
-const LEAF_GEO = new THREE.IcosahedronGeometry(0.075, 1), LEAF_GEO_LOW = new THREE.IcosahedronGeometry(0.075, 0);
-
-/**
- * 苗1本（茎1本＋子葉2枚）の行列を stems の i 番、leaves の 2i・2i+1 番に入れる。
- * y は茎の根元、hg は茎の高さ、sz は子葉の大きさ、a は子葉の向き、sw は揺れ、tilt は子葉の垂れ、wd は茎の太さの倍率
- */
-function setSeedling(du: THREE.Object3D, stems: THREE.InstancedMesh, leaves: THREE.InstancedMesh, i: number,
-  x: number, y: number, z: number, hg: number, sz: number, a: number, sw: number, tilt: number, wd = 1) {
-  du.position.set(x, y, z);
-  du.rotation.set(0, 0, sw);
-  du.scale.set(wd, hg, wd);
-  du.updateMatrix();
-  stems.setMatrixAt(i, du.matrix);
-  for (let k = 0; k < 2; k++) {
-    const b = a + k * Math.PI;
-    du.position.set(x + Math.cos(b) * 0.06 * sz + sw * hg, y + hg, z + Math.sin(b) * 0.06 * sz);
-    du.rotation.set(0, -b, (k ? 1 : -1) * tilt);
-    du.scale.set(sz, sz * 0.28, sz * 0.85);
-    du.updateMatrix();
-    leaves.setMatrixAt(i * 2 + k, du.matrix);
-  }
-}
 
 /**
  * 折れ線を角だけ丸めた管（ケーブル・ホース）。r は管の半径、bend は角の丸めの長さ
@@ -68,7 +46,7 @@ function mergeTori(rings: readonly (readonly [number, number, number])[], r: num
 
 /** 伏せた状態ランプの色（消灯） */
 const LAMP_OFF = 0x3a4048;
-const C_HEALTHY = new THREE.Color(0x6fd06a), C_DEAD = new THREE.Color(0x9a7a44);
+const C_DEAD = new THREE.Color(0x9a7a44);
 const C_ROOT = new THREE.Color(0xf6f2e6), C_ROOT_BAD = new THREE.Color(0x7d5632);
 /** 症状の色 [低い側, 高い側]。EC低＝黄緑、EC高＝茶、pH低＝紫、pH高＝白っぽい黄、液量不足＝くすんだ緑 */
 const SYMPTOM: Record<Factor, [THREE.Color, THREE.Color]> = {
@@ -90,13 +68,19 @@ export class Diorama {
   private pumpLed?: Lamp;
   private water!: THREE.Mesh;
   private raft!: THREE.Group;
-  private stems!: THREE.InstancedMesh;
-  private leaves!: THREE.InstancedMesh;
+  /** 栽培槽の苗（茎・葉・巻きひげ） */
+  private plants!: Seedlings;
   private roots!: THREE.InstancedMesh;
+  /** 補助ラックの苗と、その配置 [x, y, z, 生育段階, 向き, 傾き, 明るさのずれ] */
+  private rackPlants!: Seedlings;
+  private rackLayout: [number, number, number, number, number, number, number][] = [];
+  /** 苗の見た目を合わせている作物（変わったら葉の形と補助ラックの苗を作り直す） */
+  private cropId = '';
   private bubbles!: THREE.InstancedMesh;
   private seedlings: Seedling[] = [];
   private dummy = new THREE.Object3D();
   private color = new THREE.Color();
+  private color2 = new THREE.Color();
   /** 作物の健康な茎・葉の色（update で crops.json の look から入れる） */
   private stemColor = new THREE.Color();
   private leafColor = new THREE.Color();
@@ -239,7 +223,7 @@ export class Diorama {
   /**
    * 奥の壁沿いの補助ラック（飾り）。棚ごとに播種日をずらしたトレイを置く（生育段階が棚で違う）。
    * ラック本体（棚・トレイ・マット・LED）は .glb（aux_rack）を2台に使い回す。
-   * 苗は栽培槽と同じ形・間隔・縮尺で作り、茎と葉は InstancedMesh 1つずつ
+   * 苗は栽培槽と同じ間隔・縮尺で並べ、形と色は今育てている作物に合わせる（paintRack）
    */
   private buildRacks(b: Builder) {
     const racks = [[-2.4, -2.8], [3.2, -2.8]];
@@ -262,20 +246,20 @@ export class Diorama {
         }
       }
     });
-    // 子葉は遠目なので面数の少ない形にする（形と大きさは栽培槽と同じ）
-    const du = this.dummy, n = plants.length;
-    const stems = new THREE.InstancedMesh(STEM_GEO, mat(0xffffff), n), leaves = new THREE.InstancedMesh(LEAF_GEO_LOW, mat(0xffffff), n * 2);
-    plants.forEach(([x, y, z, g], i) => {
-      setSeedling(du, stems, leaves, i, x, y, z, 0.02 + g * 0.55, 0.25 + g * 1.3, r() * 6.28, (r() - 0.5) * 0.06, 0);
-      this.color.copy(C_HEALTHY).offsetHSL(0, 0, (r() - 0.5) * 0.04);
-      stems.setColorAt(i, this.color);
-      leaves.setColorAt(i * 2, this.color);
-      leaves.setColorAt(i * 2 + 1, this.color);
+    plants.forEach(([x, y, z, g]) => this.rackLayout.push([x, y, z, g, r() * 6.28, (r() - 0.5) * 0.06, (r() - 0.5) * 0.04]));
+    this.rackPlants = new Seedlings(b.parent, plants.length);
+  }
+
+  /** 補助ラックの苗を作物の形と色にする（栽培槽と同じ作物を育てている設定。生育段階は棚ごとに固定） */
+  private paintRack(spec: CropSpec) {
+    const rp = this.rackPlants, lk = spec.look, cs = this.stemColor.set(lk.stem), cl = this.leafColor.set(lk.leaf);
+    rp.setShape(lk.leafShape);
+    this.rackLayout.forEach(([x, y, z, g, a, sw, l], i) => {
+      // 背の高い作物（豆苗）でも上の棚の LED に届かない高さまで
+      rp.set(i, x, y, z, Math.min(RACK_PLANT_MAX, 0.02 + g * 0.55 * lk.height), 0.25 + g * 1.3 * lk.leafSize, a, sw, 0, lk.stemWidth);
+      rp.setColor(i, this.color.copy(cs).offsetHSL(0, 0, l), this.color2.copy(cl).offsetHSL(0, 0, l));
     });
-    for (const m of [stems, leaves]) {
-      m.castShadow = true;
-      b.parent.add(m);
-    }
+    rp.commit();
   }
 
   /** 制御盤・状態ランプ・モニタ・養液タンク・ポンプ。制御盤と養液タンク（ポンプ・配管込み）は .glb */
@@ -353,8 +337,7 @@ export class Diorama {
       return m;
     };
     const root = new THREE.CylinderGeometry(0.007, 0.003, 1, 4).translate(0, -0.5, 0);
-    this.stems = inst(this.raft, STEM_GEO, N, true);
-    this.leaves = inst(this.raft, LEAF_GEO, N * 2, true);
+    this.plants = new Seedlings(this.raft, N);
     this.roots = inst(this.raft, root, N, false);
     this.bubbles = inst(tg, new THREE.IcosahedronGeometry(0.04, 0), 12, false);
     Object.assign(this.bubbles.material, { transparent: true, opacity: 0.6 });
@@ -403,7 +386,13 @@ export class Diorama {
     const dg = diagnose(s), f = dg.fitness, { key: wk, side } = dg.worst, ws = 1 - dg.worst.value;
     const hp = s.crop.health, g = s.crop.growth, du = this.dummy, tc = this.color;
     // 作物ごとの形と色（crops.json の look）。症状の色はこの健康な色から寄せる
-    const look = cropSpec(s).look, cs = this.stemColor.set(look.stem), cl = this.leafColor.set(look.leaf);
+    const spec = cropSpec(s), look = spec.look;
+    if (s.crop.id !== this.cropId) {
+      this.cropId = s.crop.id;
+      this.plants.setShape(look.leafShape);
+      this.paintRack(spec);
+    }
+    const cs = this.stemColor.set(look.stem), cl = this.leafColor.set(look.leaf);
     const sick = Math.min(1, 1 - hp / 100 + ws * 0.4);
     const wilt = wk === 'water' && side === 'low' ? ws : 0;
     const small = wk === 'ec' && side === 'high' ? ws * 0.35 : 0;
@@ -425,13 +414,10 @@ export class Diorama {
       const gg = Math.max(0, Math.min(1, (g - p.delay) / (1 - p.delay)));
       const hg = (0.02 + gg * 0.55 * p.size * look.height) * pop, sw = Math.sin(t * 1.6 + p.phase) * 0.04 * (0.3 + gg);
       const sz = (0.25 + gg * 1.3 * look.leafSize) * (1 - small) * pop;
-      setSeedling(du, this.stems, this.leaves, i, p.x, 0.08, p.z, hg, sz, p.phase, sw, sick * 0.6 + wilt * 0.9, look.stemWidth);
-      const tint = (c: THREE.Color) =>
-        tc.copy(c).lerp(symptom, Math.min(1, ws * 1.3)).lerp(C_DEAD, Math.max(0, (1 - hp / 100) * 0.9)).offsetHSL(0, 0, (p.size - 1) * 0.08);
-      this.stems.setColorAt(i, tint(cs));
-      tint(cl);
-      this.leaves.setColorAt(i * 2, tc);
-      this.leaves.setColorAt(i * 2 + 1, tc);
+      this.plants.set(i, p.x, 0.08, p.z, hg, sz, p.phase, sw, sick * 0.6 + wilt * 0.9, look.stemWidth);
+      const tint = (out: THREE.Color, c: THREE.Color) =>
+        out.copy(c).lerp(symptom, Math.min(1, ws * 1.3)).lerp(C_DEAD, Math.max(0, (1 - hp / 100) * 0.9)).offsetHSL(0, 0, (p.size - 1) * 0.08);
+      this.plants.setColor(i, tint(tc, cs), tint(this.color2, cl));
       // 根：芽の段階でもトレイの底から水面に届く長さにする
       du.position.set(p.x, 0, p.z);
       du.rotation.set(0, 0, Math.sin(t * 1.2 + p.phase) * 0.05);
@@ -447,10 +433,9 @@ export class Diorama {
       du.updateMatrix();
       this.bubbles.setMatrixAt(j, du.matrix);
     }
-    for (const m of [this.stems, this.leaves, this.roots]) {
-      m.instanceMatrix.needsUpdate = true;
-      m.instanceColor!.needsUpdate = true;
-    }
+    this.plants.commit();
+    this.roots.instanceMatrix.needsUpdate = true;
+    this.roots.instanceColor!.needsUpdate = true;
     this.bubbles.instanceMatrix.needsUpdate = true;
     this.lamps.forEach((m, i) => {
       const q = [f.ec, f.ph, f.water][i];
