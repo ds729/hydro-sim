@@ -79,6 +79,23 @@ export function exchange(crop: CropState, spec: CropSpec, c: Compartment): void 
   c.ph += u.phDriftPerH * act;
 }
 
+export type Grade = 'S' | 'A' | 'B' | 'C';
+
+/** [品質の下限, 等級, 単価の倍率] */
+export const GRADES: readonly (readonly [number, Grade, number])[] = [[0.95, 'S', 1.2], [0.85, 'A', 1], [0.7, 'B', 0.7], [-Infinity, 'C', 0.4]];
+
+/** 品質から等級と単価の倍率 */
+export function gradeOf(quality: number): { grade: Grade; mult: number } {
+  const [, grade, mult] = GRADES.find(([min]) => quality >= min)!;
+  return { grade, mult };
+}
+
+/** 収穫したときの品質（律速因子の適合度の時間平均）・等級・収量。hours は播種からの経過時間 */
+export function harvestOf(crop: CropState, spec: CropSpec, hours: number): { quality: number; grade: Grade; mult: number; yieldG: number } {
+  const quality = hours > 0 ? crop.qualitySum / hours : 0;
+  return { quality, ...gradeOf(quality), yieldG: spec.yieldG * Math.sqrt(Math.max(0, crop.health) / 100) * quality };
+}
+
 /** 1時間分育つ。m は律速因子の適合度。0.5 未満で健康度が減り、0.9 超で回復する */
 export function grow(crop: CropState, spec: CropSpec, m: number): void {
   crop.growth = Math.min(1, crop.growth + m / (spec.days * 24));

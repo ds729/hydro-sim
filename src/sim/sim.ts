@@ -2,7 +2,7 @@
 
 import { execute, SUPPLIES, type Command, type DoseSupply } from './commands';
 import { applyFlows, ecOf, fill, findCompartment, type Compartment, type Flow, type Solution } from './compartment';
-import { CROPS, FACTORS, MEASURE, exchange, fitness, grow, type CropState, type Factor } from './crop';
+import { CROPS, FACTORS, MEASURE, exchange, fitness, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
 import { limiting, side } from './fitness';
 
 /** 設備の構成。水耕は栽培槽1区画で流れなし */
@@ -32,8 +32,6 @@ export type SimEvent =
     hour: number; kind: 'advice'; factor: Factor; side: 'low' | 'high'; value: number;
     fit: number; driver: DoseSupply | null; driverHour: number | null;
   };
-
-export type Grade = 'S' | 'A' | 'B' | 'C';
 
 export interface Result {
   outcome: 'harvest' | 'dead' | 'late';
@@ -73,8 +71,6 @@ export interface SimState {
 const WATCH_LOW = 0.7, WATCH_HOURS = 3, WATCH_INTERVAL = 24;
 /** この適合度以上なら「適正」とみなす（観察メモの原因は、最後に適正だった時刻より後の操作から探す） */
 const WATCH_OK = 0.9;
-
-const GRADES: [number, Grade, number][] = [[0.95, 'S', 1.2], [0.85, 'A', 1], [0.7, 'B', 0.7], [-Infinity, 'C', 0.4]];
 
 export function createSim(opts: { crop?: string; seed?: number; setup?: Setup } = {}): SimState {
   const setup = opts.setup ?? HYDROPONIC;
@@ -143,10 +139,9 @@ export function applyCommand(s: SimState, cmd: Command): boolean {
 }
 
 function finish(s: SimState, outcome: Result['outcome']): void {
-  const spec = cropSpec(s), q = s.crop.qualitySum / s.hour;
-  const [, grade, mult] = GRADES.find(([min]) => q >= min)!;
-  const yieldG = outcome === 'harvest' ? spec.yieldG * Math.sqrt(Math.max(0, s.crop.health) / 100) * q : 0;
-  const sales = (yieldG / 100) * spec.pricePer100g * mult;
+  const spec = cropSpec(s), h = harvestOf(s.crop, spec, s.hour), q = h.quality, grade = h.grade;
+  const yieldG = outcome === 'harvest' ? h.yieldG : 0;
+  const sales = (yieldG / 100) * spec.pricePer100g * h.mult;
   const losses = Object.entries(s.loss).map(([key, v]) => ({ key, value: v / s.hour })).sort((a, b) => b.value - a.value);
   s.result = { outcome, quality: q, grade, yieldG, sales, cost: s.cost, profit: sales - s.cost, losses };
 }

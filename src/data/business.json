@@ -1,0 +1,41 @@
+{
+  "startCash": 300000,
+  "monthDays": 30,
+  "rentPerMonth": 30000,
+  "powerYenPerRackDay": 120,
+  "ledPowerMult": 0.6,
+  "mediumYenPerTray": 50,
+  "slotsPerRack": 8,
+  "maxRacks": 3,
+  "solution": { "water": 2, "ec": 1.2, "ph": 6 },
+  "fridgeShelfMult": 2.333,
+  "overgrowLossPerDay": 0.25,
+  "overgrowDiscardDays": 4,
+  "measureHour": 8,
+  "directDemandGPerDay": 50,
+  "laborMin": { "sow": 5, "harvest": 10, "measure": 2 },
+  "channels": {
+    "wholesale": { "name": "卸", "priceMult": 0.4, "packYenPer100g": 5 },
+    "restaurant": { "name": "飲食店", "priceMult": 0.6, "packYenPer100g": 10 },
+    "direct": { "name": "直売", "priceMult": 1, "packYenPer100g": 60 }
+  },
+  "contracts": [
+    { "id": "bistro", "name": "ビストロ", "crop": "radish", "grams": 300, "weekday": 3, "startDay": 10, "maxMisses": 2 },
+    { "id": "cafe", "name": "カフェ", "crop": "sunflower", "grams": 500, "weekday": 5, "startDay": 12, "maxMisses": 2 },
+    { "id": "hotel", "name": "ホテルの厨房", "crop": "broccoli", "grams": 300, "weekday": 1, "startDay": 12, "maxMisses": 2 }
+  ],
+  "equipment": {
+    "rack": { "name": "棚の増設", "price": 80000, "lifeMonths": 60, "note": "トレイ8枚分の棚・LED・栽培槽を1台足す。電気代も1台分増える" },
+    "autoWater": { "name": "自動給水", "price": 15000, "lifeMonths": 36, "note": "液量が減ったら水を足す（フロート弁）。水の手間と液量不足がなくなる" },
+    "autoPh": { "name": "pH 自動調整", "price": 90000, "lifeMonths": 36, "note": "pH が適正帯の端に寄ったら調整剤を入れる。調整剤の費用はかかる" },
+    "probe": { "name": "連続測定センサ", "price": 70000, "lifeMonths": 36, "note": "EC・pH・液量を毎時読める（ペン型は朝の1回と測ったときだけ）" },
+    "fridge": { "name": "業務用冷蔵庫", "price": 100000, "lifeMonths": 60, "note": "4℃前後で保てるので日持ちが 3日から 7日に延びる" },
+    "led": { "name": "省エネ LED", "price": 40000, "lifeMonths": 60, "note": "照明の電気代が 4 割減る" }
+  },
+  "crops": {
+    "radish": { "seedG": 30, "seedYenPerG": 3.4, "trayYieldG": 300, "retailPer100g": 2000, "shelfDays": 3, "windowDays": 2 },
+    "broccoli": { "seedG": 15, "seedYenPerG": 6.5, "trayYieldG": 300, "retailPer100g": 2000, "shelfDays": 3, "windowDays": 2 },
+    "sunflower": { "seedG": 180, "seedYenPerG": 1.5, "trayYieldG": 750, "retailPer100g": 2000, "shelfDays": 3, "windowDays": 1 },
+    "pea": { "seedG": 280, "seedYenPerG": 1.25, "trayYieldG": 500, "retailPer100g": 100, "shelfDays": 3, "windowDays": 2 }
+  }
+}
