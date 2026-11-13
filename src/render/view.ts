@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { mulberry32, type SimState } from '../sim';
 import { CameraRig, type Rect } from './camera';
 import { Diorama } from './diorama';
+import type { Blind } from './monitor';
 
 // 色管理は three の既定（有効）：16進の色は sRGB として読み、リニアで光を計算して sRGB で出力する。
 // トーンマッピングは Neutral（Khronos PBR Neutral）。ACES より指定した色の色相・彩度を崩しにくく、パレットで色を決める画調に合う
@@ -42,8 +43,8 @@ export class View {
     this.rig.setViewport(w, h, safes);
   }
 
-  /** 状態を反映して1フレーム描く。t は秒、blind はセンサの表示を伏せる（症状診断モード） */
-  frame(s: SimState, t: number, blind = false): void {
+  /** 状態を反映して1フレーム描く。t は秒、blind はセンサの表示を伏せる理由 */
+  frame(s: SimState, t: number, blind: Blind = false): void {
     this.diorama.update(s, t, blind);
     this.rig.update();
     this.renderer.render(this.diorama.scene, this.rig.camera);

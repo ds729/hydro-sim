@@ -33,7 +33,7 @@ export class QuizPanel {
   /** 描画する栽培槽（今の問題） */
   get sim(): SimState | null { return this.current; }
   /** 答える前はセンサの表示を伏せる */
-  get blind(): boolean { return !!this.quiz && this.quiz.index < this.quiz.questions.length && !this.quiz.answers[this.quiz.index]; }
+  get blind(): 'quiz' | false { return !!this.quiz && this.quiz.index < this.quiz.questions.length && !this.quiz.answers[this.quiz.index] && 'quiz'; }
   get state(): Quiz | null { return this.quiz; }
 
   /** 1周を始める */

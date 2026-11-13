@@ -6,6 +6,9 @@ import { cropSpec, dayOf, type Diagnosis, type SimState } from '../sim';
 const W = 512, H = 278;
 const lamp = (q: number) => (q > 0.9 ? '#5fe09a' : q > 0.5 ? '#f2c230' : '#ff6b6b');
 
+/** センサの表示を伏せる理由（false は伏せない） */
+export type Blind = false | 'quiz' | 'noProbe';
+
 export class Monitor {
   readonly texture: THREE.CanvasTexture;
   private ctx: CanvasRenderingContext2D;
@@ -68,17 +71,18 @@ export class Monitor {
     this.texture.needsUpdate = true;
   }
 
-  /** 症状診断モードの出題中：値を伏せる */
-  drawBlind(): void {
+  /** 値を伏せる。quiz＝症状診断モードの出題中、noProbe＝経営モードで連続測定センサがない */
+  drawBlind(why: Blind): void {
     const x = this.ctx;
     x.fillStyle = '#0f2a2e';
     x.fillRect(0, 0, W, H);
     x.font = 'bold 22px sans-serif';
     x.fillStyle = '#8be3c4';
-    x.fillText('症状診断中', 16, 32);
+    x.fillText(why === 'quiz' ? '症状診断中' : 'センサなし', 16, 32);
     x.fillStyle = '#d9efe6';
     x.font = '20px sans-serif';
-    x.fillText('センサの値は答えたあとに表示します', 16, 140);
+    x.fillText(why === 'quiz' ? 'センサの値は答えたあとに表示します' : 'ペン型の計器で測った値は画面の左に出ます', 16, 140);
+    if (why === 'noProbe') x.fillText('連続測定センサを付けると毎時表示します', 16, 172);
     this.texture.needsUpdate = true;
   }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  BUSINESS, CROPS, applyFarmCommand, canBuy, createFarm, createSim, farmTick, rackValues, reserved, tick, totals,
+  BUSINESS, CROPS, applyFarmCommand, canBuy, createFarm, createSim, farmTick, rackValues, reserved, tick, totals, trayEstimate,
   type Factor, type FarmState, type Ledger,
 } from './index';
 
@@ -117,6 +117,23 @@ describe('経営モード（Phase 4）', () => {
     expect(french.crop).toBe('pea');
     const retail = BUSINESS.crops.pea.retailPer100g * BUSINESS.channels.restaurant.priceMult;
     expect(french.pricePer100g).toBeGreaterThan(retail * 10);
+  });
+
+  test('1トレイの見込み：豆苗は量販（卸・直売）だと赤字、若芽としてフレンチに納めれば黒字', () => {
+    const pea = trayEstimate('pea'), by = (k: string) => pea.outlets.find(o => (o.contract ?? o.kind) === k)!;
+    expect(pea.cost.total).toBeCloseTo(pea.cost.seed + pea.cost.medium + pea.cost.power);
+    expect(by('wholesale').profit).toBeLessThan(0);
+    expect(by('direct').profit).toBeLessThan(0);
+    expect(by('french').profit).toBeGreaterThan(0);
+    // アブラナ科・ひまわりはどの販路でも黒字
+    for (const c of ['radish', 'broccoli', 'sunflower']) for (const o of trayEstimate(c).outlets) expect(o.profit).toBeGreaterThan(0);
+    // 省エネ LED で電気代が下がる
+    expect(trayEstimate('pea', BUSINESS, { led: 1 }).cost.power).toBeLessThan(pea.cost.power);
+    // 直売は日持ちの間に売れる分だけ（残りは卸）。冷蔵庫で日持ちが延びると直売で売れる量が増える
+    const dr = (eq = {}) => trayEstimate('radish', BUSINESS, eq).outlets.find(o => o.kind === 'direct')!;
+    expect(dr().grams).toBe(BUSINESS.directDemandGPerDay * BUSINESS.crops.radish.shelfDays);
+    expect(dr({ fridge: 1 }).grams).toBeGreaterThan(dr().grams);
+    expect(dr({ fridge: 1 }).net).toBeGreaterThan(dr().net);
   });
 
   test('日持ちを過ぎた在庫は廃棄になり、冷蔵庫で延びる', () => {

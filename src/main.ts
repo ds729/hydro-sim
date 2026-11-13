@@ -1,7 +1,7 @@
 // 画面の組み立てとメインループ。sim は固定タイムステップ（1 tick ＝ 1時間）で進め、描画は毎フレーム
 
 import './ui/style.css';
-import { applyCommand, createSim, CROPS, cropSpec, tick, type Command, type SimState } from './sim';
+import { applyCommand, BUSINESS, createFarm, createSim, CROPS, cropSpec, farmTick, tick, type Command, type FarmCommand, type SimState } from './sim';
 import { PRESETS, type PresetName } from './render/camera';
 import { modelStatus } from './render/models';
 import { View, type Quality } from './render/view';
@@ -10,6 +10,7 @@ import { shortName, showResult } from './ui/result';
 import { mountQuality } from './ui/quality';
 import { mountTools } from './ui/tools';
 import { QuizPanel } from './ui/quiz';
+import { FarmPanel } from './ui/farm';
 import { markSeen, openZukan } from './ui/zukan';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -34,27 +35,38 @@ const hud = new Hud(cropSpec(s), e => {
 markSeen('crops', s.crop.id);
 $('zo').onclick = () => openZukan();
 
+type Mode = 'grow' | 'quiz' | 'farm';
+let mode: Mode = 'grow';
+
 /** 症状診断モード。診断中は栽培を止め、栽培の状態はそのまま残す */
 const quiz = new QuizPanel(() => setMode('grow'));
+/** 経営モード。栽培モードとは別の状態（FarmState）で、モードを切り替えても続きから。月を締めたら時間を止める */
+const farm = new FarmPanel(createFarm(), () => setSpeed(0));
 
+/** 道具バーの操作。経営モードでは選んでいる棚に効かせる */
 function send(c: Command) {
-  if (!quiz.active && applyCommand(s, c)) dirty = true;
+  if (mode === 'farm') { if (farm.send({ ...c, target: farm.rackId() })) dirty = true; }
+  else if (mode === 'grow' && applyCommand(s, c)) dirty = true;
 }
 
-/** モードを切り替える（栽培 ⇔ 症状診断）。seed は診断の問題の乱数 */
-function setMode(m: 'grow' | 'quiz', seed = Date.now()) {
+/** モードを切り替える（栽培・症状診断・経営）。seed は診断の問題の乱数 */
+function setMode(m: Mode, seed = Date.now()) {
   if (m === 'quiz') quiz.start(seed); else quiz.stop();
+  if (m !== 'farm') farm.closeBook();
+  mode = m;
   app.classList.toggle('qm', m === 'quiz');
+  app.classList.toggle('fm', m === 'farm');
   for (const [k, b] of modeBtns) b.classList.toggle('on', k === m);
+  setToolScale(m === 'farm' ? BUSINESS.slotsPerRack : 1);
   view.rig.goTo(m === 'quiz' ? '寄り' : '全景');
   dirty = true;
 }
-const modeBtns = ([['grow', '栽培'], ['quiz', '症状診断']] as const).map(([k, label]) => {
+const modeBtns = ([['grow', '栽培'], ['quiz', '症状診断'], ['farm', '経営']] as const).map(([k, label]) => {
   const b = document.createElement('button');
   b.textContent = label;
   if (k === 'grow') b.className = 'on';
   b.onclick = () => {
-    if (k === (quiz.active ? 'quiz' : 'grow')) return;
+    if (k === mode) return;
     setMode(k);
     // スマホは ☰ を閉じて 3D を見せる
     if (app.classList.contains('so')) menu.click();
@@ -112,15 +124,17 @@ function layout() {
 
 // 時間・カメラ・メニュー
 const sp = $('sp');
-for (const [label, v] of [['⏸', 0], ['×1', 1], ['×4', 4], ['×16', 16]] as const) {
+const speedBtns = ([['⏸', 0], ['×1', 1], ['×4', 4], ['×16', 16]] as const).map(([label, v]) => {
   const b = document.createElement('button');
   b.textContent = label;
   if (v === speed) b.className = 'on';
-  b.onclick = () => {
-    speed = v;
-    for (const c of sp.children) c.classList.toggle('on', c === b);
-  };
+  b.onclick = () => setSpeed(v);
   sp.appendChild(b);
+  return [v, b] as const;
+});
+function setSpeed(v: number) {
+  speed = v;
+  for (const [k, b] of speedBtns) b.classList.toggle('on', k === v);
 }
 for (const k of Object.keys(PRESETS) as PresetName[]) {
   const b = document.createElement('button');
@@ -133,7 +147,7 @@ menu.onclick = () => {
   menu.setAttribute('aria-expanded', String(open));
   menu.classList.remove('nw');
 };
-mountTools($('bar'), send);
+const setToolScale = mountTools($('bar'), send);
 mountQuality($('qa'), q => view.setQuality(q));
 
 hud.update(s);
@@ -152,16 +166,21 @@ let frames = 0, fpsAt = last, fps = 0;
 function loop(now: number) {
   const dt = Math.min(0.25, (now - last) / 1000);
   last = now;
-  if (!quiz.active && !s.result && speed) {
+  if (mode === 'grow' && !s.result && speed) {
     acc += dt * speed;
     while (acc >= 1 && !s.result) { acc--; tick(s); dirty = true; }
+  } else if (mode === 'farm' && speed) {
+    acc += dt * speed;
+    // 月を締めると setSpeed(0) で止まるので、そこで抜ける
+    while (acc >= 1 && speed) { acc--; farmTick(farm.state); farm.update(); dirty = true; }
   }
   sinceHud += dt;
-  if (!quiz.active) {
+  if (mode === 'grow') {
     if (dirty || sinceHud > 0.1) { hud.update(s); dirty = false; sinceHud = 0; }
     if (s.result && !resultShown) { resultShown = true; showResult(s.result, s.crop.id, restart); }
-  }
-  view.frame(quiz.sim ?? s, now / 1000, quiz.blind);
+  } else if (mode === 'farm' && (dirty || sinceHud > 0.1)) { farm.update(); dirty = false; sinceHud = 0; }
+  if (mode === 'farm') view.frame(farm.sim ?? s, now / 1000, farm.blind);
+  else view.frame(quiz.sim ?? s, now / 1000, quiz.blind);
   frames++;
   if (now - fpsAt >= 1000) {
     fps = (frames * 1000) / (now - fpsAt);
@@ -182,12 +201,19 @@ Object.assign(window, {
     send,
     /** 始め直す（作物 id を渡すとその作物で。確認なし） */
     restart,
-    setSpeed(v: number) { speed = v; },
+    setSpeed,
     camera(name: PresetName, instant = true) { view.rig.goTo(name, instant); },
     toggleMenu() { menu.click(); },
     renderInfo() { return { ...view.renderer.info.render }; },
     /** 症状診断モード：mode('quiz', seed) で始める。quiz.answer({factor:'ec',side:'high'})・quiz.next() で進める */
     mode: setMode,
+    /** 経営モード：mode('farm') で切り替え、farm.state で状態、farm.send({type:'sow',rack:'rack1',slot:0,crop:'radish'}) で操作 */
+    farm,
+    /** 経営モードを n 時間進める（速度とは無関係に即時） */
+    farmTick(n = 1) { for (let i = 0; i < n; i++) farmTick(farm.state); farm.update(); },
+    /** 経営モードを始め直す */
+    farmReset() { farm.reset(createFarm()); farm.update(); },
+    farmSend(c: FarmCommand) { const ok = farm.send(c); farm.update(); return ok; },
     /** 図鑑を開く（'crops' / 'symptoms'） */
     zukan: openZukan,
     quiz,

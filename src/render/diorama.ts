@@ -6,7 +6,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { bedOf, cropSpec, diagnose, mulberry32, type CropSpec, type Factor, type SimState } from '../sim';
 import { bakedShadow, boxSet, Builder, LED, mat, SLAB, type BoxSpec } from './build';
 import { loadModel } from './models';
-import { Monitor } from './monitor';
+import { Monitor, type Blind } from './monitor';
 import { Seedlings } from './seedling';
 
 /** 栽培槽：幅・奥行き・水位の最大高さ・底板の上面 */
@@ -85,7 +85,7 @@ export class Diorama {
   private stemColor = new THREE.Color();
   private leafColor = new THREE.Color();
   /** モニタを伏せているか（切り替わったらすぐ描き直す） */
-  private blind = false;
+  private blind: Blind = false;
   /** 表示中の液量（実際の値に滑らかに追従させる） */
   private shownWater = 2;
   /** 生育段階（4段階）が変わった時刻。苗が弾む演出に使う */
@@ -380,9 +380,9 @@ export class Diorama {
 
   /**
    * 状態を見た目に反映する。t は秒。最も悪い要因が苗の色と形を決める。
-   * blind：センサの表示（制御盤の状態ランプ・モニタ）を伏せる（症状診断モードで、見た目だけから当てさせる）
+   * blind：センサの表示（制御盤の状態ランプ・モニタ）を伏せる（症状診断モードで見た目だけから当てさせる、経営モードで連続測定センサがない）
    */
-  update(s: SimState, t: number, blind = false): void {
+  update(s: SimState, t: number, blind: Blind = false): void {
     const dg = diagnose(s), f = dg.fitness, { key: wk, side } = dg.worst, ws = 1 - dg.worst.value;
     const hp = s.crop.health, g = s.crop.growth, du = this.dummy, tc = this.color;
     // 作物ごとの形と色（crops.json の look）。症状の色はこの健康な色から寄せる
@@ -446,7 +446,7 @@ export class Diorama {
     if (t - this.monitorAt > 0.4 || blind !== this.blind) {
       this.monitorAt = t;
       this.blind = blind;
-      if (blind) this.monitor.drawBlind(); else this.monitor.draw(s, dg);
+      if (blind) this.monitor.drawBlind(blind); else this.monitor.draw(s, dg);
     }
   }
 }

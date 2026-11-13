@@ -16,8 +16,12 @@ export const TOOLS: Tool[] = [
 const price = (c: Command) =>
   c.type === 'dose' ? SUPPLIES[c.supply].pricePerUnit * c.amount : SUPPLIES.solution.pricePerUnit;
 
-/** 道具バーを作り、クリックとキー 1〜5 でコマンドを送る */
-export function mountTools(bar: HTMLElement, send: (c: Command) => void): void {
+/**
+ * 道具バーを作り、クリックとキー 1〜5 でコマンドを送る。
+ * 返す関数で値段の表示を n 倍にする（経営モードは棚＝トレイ8枚分に効くので 8 倍）
+ */
+export function mountTools(bar: HTMLElement, send: (c: Command) => void): (n: number) => void {
+  const prices: [HTMLElement, number][] = [];
   for (const t of TOOLS) {
     const b = document.createElement('button'), p = price(t.command);
     b.className = 'tl';
@@ -32,6 +36,8 @@ export function mountTools(bar: HTMLElement, send: (c: Command) => void): void {
       b.classList.add('tap');
     };
     bar.appendChild(b);
+    prices.push([b.querySelector('em')!, p]);
   }
   addEventListener('keydown', e => (bar.querySelector(`[data-k="${e.key}"]`) as HTMLButtonElement | null)?.click());
+  return n => { for (const [em, p] of prices) em.textContent = p ? '¥' + p * n : '無料'; };
 }

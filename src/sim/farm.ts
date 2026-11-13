@@ -520,3 +520,55 @@ function perform(f: FarmState, b: Business, cmd: FarmCommand): boolean {
     }
   }
 }
+
+// ---- 見込み（画面用。状態を変えない） ----
+
+/**
+ * 販路ごとの1トレイの手取り。contract は契約の納品量、direct は日持ちの間に直売で売れる量（1日の需要×日持ち）を
+ * その販路で売り、残りを卸に出した場合
+ */
+export interface TrayOutlet {
+  kind: 'wholesale' | 'direct' | 'contract';
+  /** kind が contract のときの契約 id */
+  contract?: string;
+  /** その販路で売る量 g（残りは卸） */
+  grams: number;
+  /** 売上 − 包装費 */
+  net: number;
+  /** 1トレイの手取り − 費用 */
+  profit: number;
+}
+
+export interface TrayEstimate {
+  crop: string;
+  /** 最適条件で育ち終えるまでの日数 */
+  days: number;
+  /** 等級 A・健康度 100 の収量 g */
+  yieldG: number;
+  /** 種・培地・電気代（棚1台の電気代をトレイ数で割り、日数分）。家賃・作業時間・養液は含まない */
+  cost: { seed: number; medium: number; power: number; total: number };
+  outlets: TrayOutlet[];
+}
+
+/** 作物ごとの1トレイの損益見込み（等級 A・健康に育った場合）。eq は持っている設備（省エネ LED・業務用冷蔵庫が効く） */
+export function trayEstimate(crop: string, b: Business = BUSINESS, eq: Partial<Record<EquipmentId, number>> = {}): TrayEstimate {
+  const cb = b.crops[crop], days = CROPS[crop].days, g = cb.trayYieldG, led = !!eq.led;
+  const shelf = cb.shelfDays * (eq.fridge ? b.fridgeShelfMult : 1);
+  const seed = cb.seedG * cb.seedYenPerG, medium = b.mediumYenPerTray;
+  const power = (b.powerYenPerRackDay / b.slotsPerRack) * days * (led ? b.ledPowerMult : 1);
+  const total = seed + medium + power;
+  const net = (grams: number, ch: RevenueKey, contract?: Contract) =>
+    (grams / 100) * (unitPrice(b, crop, ch, contract) - b.channels[ch].packYenPer100g);
+  /** grams をその販路で、残りを卸で売る */
+  const outlet = (kind: TrayOutlet['kind'], grams: number, ch: RevenueKey, contract?: Contract): TrayOutlet => {
+    const x = Math.min(g, grams), n = net(x, ch, contract) + net(g - x, 'wholesale');
+    return { kind, ...(contract && { contract: contract.id }), grams: x, net: n, profit: n - total };
+  };
+  const outlets: TrayOutlet[] = [
+    ...b.contracts.filter(c => c.crop === crop).map(c => outlet('contract', c.grams, 'restaurant', c)),
+    outlet('wholesale', g, 'wholesale'),
+    // 直売の需要は作物によらず合計なので、ほかの在庫と取り合う。ここでは1トレイが独り占めした場合
+    outlet('direct', b.directDemandGPerDay * shelf, 'direct'),
+  ];
+  return { crop, days, yieldG: g, cost: { seed, medium, power, total }, outlets };
+}
