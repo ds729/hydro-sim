@@ -2,7 +2,7 @@
 // 形はローポリ＋フラットシェーディング（面数を抑えた押し出し形）。色は症状に合わせて外から入れる
 
 import * as THREE from 'three';
-import type { LeafShape } from '../sim';
+import type { Factor, LeafShape } from '../sim';
 import { mat } from './build';
 
 /** 茎（根元が原点、高さ 1） */
@@ -58,6 +58,15 @@ const TENDRIL_GEO = (() => {
   }
   return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 10, 0.005, 3);
 })();
+
+/** 枯れた苗の色 */
+export const C_DEAD = new THREE.Color(0x9a7a44);
+/** 症状の色 [低い側, 高い側]。EC低＝黄緑、EC高＝茶、pH低＝紫、pH高＝白っぽい黄、液量不足＝くすんだ緑 */
+export const SYMPTOM: Record<Factor, [THREE.Color, THREE.Color]> = {
+  ec: [new THREE.Color(0xc6dc5a), new THREE.Color(0xb3873a)],
+  ph: [new THREE.Color(0xb98fc8), new THREE.Color(0xeceaa6)],
+  water: [new THREE.Color(0xa9bf6a), new THREE.Color(0x9bc0a0)],
+};
 
 /**
  * 形ごとの葉の付き方。nodes は [茎の高さに対する位置, 大きさの倍率, 向きのずれ（rad）] で、節ごとに葉が左右に1対付く。
@@ -142,6 +151,13 @@ export class Seedlings {
     this.stems.setColorAt(i, stem);
     if (this.form.tendril) this.tendrils.setColorAt(i, stem);
     for (let k = 0; k < per; k++) this.leaves.setColorAt(i * per + k, leaf);
+  }
+
+  /** 描く苗の数を n 本に絞る（先頭から。経営モードの棚で、形ごとの組に苗を詰めて使う） */
+  setCount(n: number): void {
+    this.stems.count = n;
+    this.leaves.count = n * this.form.nodes.length * 2;
+    this.tendrils.count = this.form.tendril ? n : 0;
   }
 
   /** 行列と色を描画に反映する（set・setColor の後に1回） */

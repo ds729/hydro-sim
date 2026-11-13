@@ -179,7 +179,7 @@ function loop(now: number) {
     if (dirty || sinceHud > 0.1) { hud.update(s); dirty = false; sinceHud = 0; }
     if (s.result && !resultShown) { resultShown = true; showResult(s.result, s.crop.id, restart); }
   } else if (mode === 'farm' && (dirty || sinceHud > 0.1)) { farm.update(); dirty = false; sinceHud = 0; }
-  if (mode === 'farm') view.frame(farm.sim ?? s, now / 1000, farm.blind);
+  if (mode === 'farm') view.frameFarm(farm.state, farm.rack, farm.slot, farm.sim ?? s, now / 1000, farm.blind);
   else view.frame(quiz.sim ?? s, now / 1000, quiz.blind);
   frames++;
   if (now - fpsAt >= 1000) {

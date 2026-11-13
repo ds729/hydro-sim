@@ -1,7 +1,7 @@
 // 描画層の入口：レンダラ・ジオラマ・カメラをまとめる
 
 import * as THREE from 'three';
-import { mulberry32, type SimState } from '../sim';
+import { mulberry32, type FarmState, type SimState } from '../sim';
 import { CameraRig, type Rect } from './camera';
 import { Diorama } from './diorama';
 import type { Blind } from './monitor';
@@ -46,6 +46,13 @@ export class View {
   /** 状態を反映して1フレーム描く。t は秒、blind はセンサの表示を伏せる理由 */
   frame(s: SimState, t: number, blind: Blind = false): void {
     this.diorama.update(s, t, blind);
+    this.rig.update();
+    this.renderer.render(this.diorama.scene, this.rig.camera);
+  }
+
+  /** 経営モード：棚を描く。rack・slot は選んでいるトレイ、mon は制御盤とモニタに出す見かけの栽培槽 */
+  frameFarm(f: FarmState, rack: number, slot: number, mon: SimState, t: number, blind: Blind): void {
+    this.diorama.updateFarm(f, rack, slot, mon, t, blind);
     this.rig.update();
     this.renderer.render(this.diorama.scene, this.rig.camera);
   }

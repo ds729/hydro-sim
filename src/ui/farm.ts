@@ -43,7 +43,7 @@ export class FarmPanel {
   /** 選んでいる棚（番号）とトレイ */
   rack = 0;
   slot = 0;
-  /** 描画用の見かけの栽培槽（選んだトレイ。区切り3 で棚の 3D にするまでのつなぎ） */
+  /** 制御盤のランプとモニタに出す見かけの栽培槽（選んだトレイ） */
   private view: SimState | null = null;
   private trayBtns: HTMLButtonElement[] = [];
   private bookTab: BookTab | null = null;

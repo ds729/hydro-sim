@@ -3,11 +3,12 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { bedOf, cropSpec, diagnose, mulberry32, type CropSpec, type Factor, type SimState } from '../sim';
+import { bedOf, cropSpec, diagnose, mulberry32, type CropSpec, type Diagnosis, type FarmState, type SimState } from '../sim';
 import { bakedShadow, boxSet, Builder, LED, mat, SLAB, type BoxSpec } from './build';
 import { loadModel } from './models';
 import { Monitor, type Blind } from './monitor';
-import { Seedlings } from './seedling';
+import { FarmRacks } from './farmrack';
+import { C_DEAD, Seedlings, SYMPTOM } from './seedling';
 
 /** 栽培槽：幅・奥行き・水位の最大高さ・底板の上面 */
 const W = 4, D = 2.4, HM = 1.45, WB = 0.23;
@@ -46,14 +47,7 @@ function mergeTori(rings: readonly (readonly [number, number, number])[], r: num
 
 /** 伏せた状態ランプの色（消灯） */
 const LAMP_OFF = 0x3a4048;
-const C_DEAD = new THREE.Color(0x9a7a44);
 const C_ROOT = new THREE.Color(0xf6f2e6), C_ROOT_BAD = new THREE.Color(0x7d5632);
-/** 症状の色 [低い側, 高い側]。EC低＝黄緑、EC高＝茶、pH低＝紫、pH高＝白っぽい黄、液量不足＝くすんだ緑 */
-const SYMPTOM: Record<Factor, [THREE.Color, THREE.Color]> = {
-  ec: [new THREE.Color(0xc6dc5a), new THREE.Color(0xb3873a)],
-  ph: [new THREE.Color(0xb98fc8), new THREE.Color(0xeceaa6)],
-  water: [new THREE.Color(0xa9bf6a), new THREE.Color(0x9bc0a0)],
-};
 
 interface Seedling { x: number; z: number; delay: number; size: number; phase: number }
 type Lamp = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
@@ -66,6 +60,11 @@ export class Diorama {
   /** 状態ランプとポンプの運転ランプ（.glb の読み込み後に入る） */
   private lamps: Lamp[] = [];
   private pumpLed?: Lamp;
+  /** 栽培槽（ガラス槽・浮きトレイ・苗・センサ）とセンサケーブル。経営モードでは隠して棚を出す */
+  private tank!: THREE.Group;
+  private cables: THREE.Object3D[] = [];
+  /** 経営モードの栽培棚（初めて経営モードを描くときに作る） */
+  private farm?: FarmRacks;
   private water!: THREE.Mesh;
   private raft!: THREE.Group;
   /** 栽培槽の苗（茎・葉・巻きひげ） */
@@ -115,7 +114,7 @@ export class Diorama {
     const ao = bakedShadow(9.4, 7.4, [
       [0, -3.55, 9.4, 0.34, 0.3], [-4.55, 0, 0.34, 7.4, 0.3],
       [-2.4, -2.8, 2.3, 0.95, 0.22], [3.2, -2.8, 2.3, 0.95, 0.22],
-      [-4.15, 0.6, 0.5, 1.3, 0.38], [0.6, 0.8, W + 0.3, D + 0.3, 0.42],
+      [-4.15, 0.6, 0.5, 1.3, 0.38],
       [3.7, 1.0, 0.9, 0.9, 0.38], [3.1, 0.2, 0.4, 0.35, 0.3],
       [-3.2, 2.6, 0.7, 0.5, 0.38], [-2.4, 2.7, 0.7, 0.5, 0.38],
       [4.15, 2.05, 0.3, 0.3, 0.32], [3.37, 2.95, 0.45, 0.45, 0.25], [-4.15, 1.87, 0.42, 0.65, 0.35], [-2.75, 0.25, 2.3, 0.18, 0.18],
@@ -292,9 +291,13 @@ export class Diorama {
 
   /** 栽培槽（主役）：ガラス槽・水・浮きトレイ・LED・センサ・苗 */
   private buildTank() {
-    const tg = new THREE.Group(), b = new Builder(tg), r = this.rand;
+    const tg = (this.tank = new THREE.Group()), b = new Builder(tg), r = this.rand;
     tg.position.set(0.6, 0, 0.8);
     this.scene.add(tg);
+    // 槽の台の接地影（部屋の接地影とは別の板にして、経営モードで槽と一緒に隠す）
+    const ao = bakedShadow(W + 1.3, D + 1.3, [[0, 0, W + 0.3, D + 0.3, 0.42]], 0.45, 24);
+    ao.position.y = 0.021;
+    tg.add(ao);
     b.box(W + 0.3, 0.23, D + 0.3, 0x7f8894, 0, 0.115, 0);
     const glass = new THREE.Mesh(new THREE.BoxGeometry(W, 2.1, D), mat(0xcdeeff, { transparent: true, opacity: 0.14, depthWrite: false }));
     glass.position.y = WB + 1.05;
@@ -352,12 +355,13 @@ export class Diorama {
     PROBE_Z.forEach((z, i) => {
       // 2本は梁の上では上下に、床では左右にずらして並べる
       const d = (i - 0.5) * 0.045, px = ox + PROBE_X, pz = oz + z, y = 3.0 + d;
-      this.scene.add(tube([
+      this.cables.push(tube([
         [px, PROBE_TOP + 0.05, pz], [px, 2.75, pz], [R + 0.06, 2.9, pz], [R + 0.06, y, pz], [R + 0.06, y, BK - 0.06],
         [L + d, y, BK - 0.07], [L + d, 0.25, BK - 0.07], [L - 0.09, 0.25, BK - 0.07], [L - 0.09, 0.25, duct + d],
         [L - 0.17, 0.25, duct + d], [L - 0.17, 0.02, duct + d], [-3.95, 0.02, duct + d],
       ], 0.02, 0x2b3138));
     });
+    this.scene.add(...this.cables);
     // 床のケーブルプロテクター（槽の台の左端から制御盤の前まで）。灰色の本体に黄色の筋
     const x0 = L - 0.12, x1 = -3.9, cx = (x0 + x1) / 2, len = x0 - x1;
     boxes.push([len, 0.035, 0.18, 0x4a5058, cx, 0.0175, duct], [len, 0.004, 0.05, 0xf2c230, cx, 0.037, duct]);
@@ -383,7 +387,8 @@ export class Diorama {
    * blind：センサの表示（制御盤の状態ランプ・モニタ）を伏せる（症状診断モードで見た目だけから当てさせる、経営モードで連続測定センサがない）
    */
   update(s: SimState, t: number, blind: Blind = false): void {
-    const dg = diagnose(s), f = dg.fitness, { key: wk, side } = dg.worst, ws = 1 - dg.worst.value;
+    this.showTank(true);
+    const dg = diagnose(s), { key: wk, side } = dg.worst, ws = 1 - dg.worst.value;
     const hp = s.crop.health, g = s.crop.growth, du = this.dummy, tc = this.color;
     // 作物ごとの形と色（crops.json の look）。症状の色はこの健康な色から寄せる
     const spec = cropSpec(s), look = spec.look;
@@ -437,6 +442,28 @@ export class Diorama {
     this.roots.instanceMatrix.needsUpdate = true;
     this.roots.instanceColor!.needsUpdate = true;
     this.bubbles.instanceMatrix.needsUpdate = true;
+    this.panel(s, dg, t, blind);
+  }
+
+  /**
+   * 経営モード：栽培槽の代わりに棚を出す。rack・slot は選んでいるトレイ（枠で示す）。
+   * 制御盤のランプとモニタは選んだトレイの見かけの栽培槽 mon で描く（連続測定センサがなければ blind で伏せる）
+   */
+  updateFarm(f: FarmState, rack: number, slot: number, mon: SimState, t: number, blind: Blind): void {
+    this.showTank(false);
+    (this.farm ??= new FarmRacks(this.scene)).update(f, rack, slot);
+    this.panel(mon, diagnose(mon), t, blind);
+  }
+
+  private showTank(v: boolean) {
+    this.tank.visible = v;
+    for (const c of this.cables) c.visible = v;
+    if (this.farm) this.farm.visible = !v;
+  }
+
+  /** 制御盤の状態ランプ・ポンプの運転ランプ・モニタ */
+  private panel(s: SimState, dg: Diagnosis, t: number, blind: Blind) {
+    const f = dg.fitness;
     this.lamps.forEach((m, i) => {
       const q = [f.ec, f.ph, f.water][i];
       m.material.color.setHex(blind ? LAMP_OFF : q > 0.9 ? 0x5fe09a : q > 0.5 ? 0xf2c230 : 0xff6b6b);
