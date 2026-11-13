@@ -44,6 +44,10 @@ export interface Contract {
   startDay: number;
   /** 欠品がこの回数に達したら契約が切れる */
   maxMisses: number;
+  /** 契約で決めた単価 円/100g（省略時は小売単価×飲食店の倍率）。同じ作物でも「何として売るか」で値段が変わる */
+  pricePer100g?: number;
+  /** 契約の説明（画面用） */
+  note?: string;
 }
 
 export interface Equipment {
@@ -147,8 +151,8 @@ export type FarmCommand =
   | { type: 'clear'; rack: string; slot: number }
   /** ペン型の計器で今の値を測る */
   | { type: 'measure' }
-  /** 在庫を全部卸に出す */
-  | { type: 'wholesale' }
+  /** 在庫を卸に出す（crop を指定するとその作物だけ）。明日・あさっての納品の取り置きは残す */
+  | { type: 'wholesale'; crop?: string }
   | { type: 'buy'; item: EquipmentId };
 
 export type FarmEvent =
@@ -262,7 +266,8 @@ export function freshness(t: Tray, hour: number, b: Business = BUSINESS): number
   return over <= 0 ? 1 : Math.max(0, 1 - b.overgrowLossPerDay * over);
 }
 
-const unitPrice = (b: Business, crop: string, ch: keyof Business['channels']) => b.crops[crop].retailPer100g * b.channels[ch].priceMult;
+const unitPrice = (b: Business, crop: string, ch: keyof Business['channels'], contract?: Contract) =>
+  contract?.pricePer100g ?? b.crops[crop].retailPer100g * b.channels[ch].priceMult;
 
 // ---- 進行 ----
 
@@ -350,7 +355,7 @@ function daily(f: FarmState, b: Business): void {
   for (const c of b.contracts) {
     const st = f.contracts[c.id];
     if (st.lost || c.weekday !== weekday || farmDay(f) < c.startDay) continue;
-    const { grams, yen } = take(f, b, c.crop, c.grams, 'restaurant');
+    const { grams, yen } = take(f, b, c.crop, c.grams, 'restaurant', {}, c);
     const short = c.grams - grams;
     f.log.push({ hour: f.hour, kind: 'delivery', contract: c.id, grams, short, yen });
     // 1 割までの不足は許してもらえる
@@ -382,8 +387,8 @@ export function reserved(f: FarmState, b: Business = BUSINESS): Record<string, n
  * 在庫から作物を古い順に grams まで出して売る（crop が null なら作物を問わない）。
  * keep の分（作物ごとの取り置き）は新しい在庫から残す。売れた量と売上を返す
  */
-function take(f: FarmState, b: Business, crop: string | null, grams: number, ch: RevenueKey, keep: Record<string, number> = {}): { grams: number; yen: number } {
-  let need = grams, yen = 0;
+function take(f: FarmState, b: Business, crop: string | null, grams: number, ch: RevenueKey, keep: Record<string, number> = {}, contract?: Contract): { grams: number; yen: number } {
+  let need = grams, sold = 0, yen = 0;
   const avail: Record<string, number> = {};
   for (const l of f.stock) avail[l.crop] = (avail[l.crop] ?? 0) + l.grams;
   for (const k in avail) avail[k] = Math.max(0, avail[k] - (keep[k] ?? 0));
@@ -394,14 +399,15 @@ function take(f: FarmState, b: Business, crop: string | null, grams: number, ch:
     avail[l.crop] -= g;
     l.grams -= g;
     need -= g;
-    yen += sell(f, b, l, g, ch);
+    sold += g;
+    yen += sell(f, b, l, g, ch, contract);
   }
   f.stock = f.stock.filter(l => l.grams > 1e-6);
-  return { grams: grams - need, yen };
+  return { grams: sold, yen };
 }
 
-function sell(f: FarmState, b: Business, l: Lot, g: number, ch: RevenueKey): number {
-  const yen = (g / 100) * unitPrice(b, l.crop, ch) * l.mult;
+function sell(f: FarmState, b: Business, l: Lot, g: number, ch: RevenueKey, contract?: Contract): number {
+  const yen = (g / 100) * unitPrice(b, l.crop, ch, contract) * l.mult;
   f.ledger.revenue[ch] += yen;
   f.ledger.soldG += g;
   f.cash += yen;
@@ -500,10 +506,8 @@ function perform(f: FarmState, b: Business, cmd: FarmCommand): boolean {
       return true;
     }
     case 'wholesale': {
-      if (!f.stock.length) return false;
-      for (const l of f.stock) sell(f, b, l, l.grams, 'wholesale');
-      f.stock = [];
-      return true;
+      const { grams } = take(f, b, cmd.crop ?? null, Infinity, 'wholesale', reserved(f, b));
+      return grams > 0;
     }
     case 'buy': {
       if (!canBuy(f, cmd.item, b)) return false;

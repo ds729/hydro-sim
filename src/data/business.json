@@ -22,7 +22,8 @@
   "contracts": [
     { "id": "bistro", "name": "ビストロ", "crop": "radish", "grams": 300, "weekday": 3, "startDay": 10, "maxMisses": 2 },
     { "id": "cafe", "name": "カフェ", "crop": "sunflower", "grams": 500, "weekday": 5, "startDay": 12, "maxMisses": 2 },
-    { "id": "hotel", "name": "ホテルの厨房", "crop": "broccoli", "grams": 300, "weekday": 1, "startDay": 12, "maxMisses": 2 }
+    { "id": "hotel", "name": "ホテルの厨房", "crop": "broccoli", "grams": 300, "weekday": 1, "startDay": 12, "maxMisses": 2 },
+    { "id": "french", "name": "フレンチ", "crop": "pea", "grams": 100, "weekday": 2, "startDay": 14, "maxMisses": 2, "pricePer100g": 1200, "note": "豆苗を巻きひげつきの若芽として料理の飾りに使う。量は少ないが、単価はマイクロハーブと同じ" }
   ],
   "equipment": {
     "rack": { "name": "棚の増設", "price": 80000, "lifeMonths": 60, "note": "トレイ8枚分の棚・LED・栽培槽を1台足す。電気代も1台分増える" },

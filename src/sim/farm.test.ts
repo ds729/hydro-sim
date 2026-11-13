@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  BUSINESS, CROPS, applyFarmCommand, canBuy, createFarm, createSim, farmTick, rackValues, tick, totals,
+  BUSINESS, CROPS, applyFarmCommand, canBuy, createFarm, createSim, farmTick, rackValues, reserved, tick, totals,
   type Factor, type FarmState, type Ledger,
 } from './index';
 
@@ -70,23 +70,53 @@ describe('経営モード（Phase 4）', () => {
   });
 
   test('播種で種子と培地の費用、収穫で在庫、卸で売上', () => {
-    const f = createFarm(), cb = BUSINESS.crops.radish;
-    applyFarmCommand(f, { type: 'sow', rack: R, slot: 0, crop: 'radish' });
+    // ブロッコリー：収穫する Day 11 にはホテルの納品（Day 15）がまだ遠く、取り置きが出ない。取り置きは次のテスト
+    const f = createFarm(), cb = BUSINESS.crops.broccoli;
+    applyFarmCommand(f, { type: 'sow', rack: R, slot: 0, crop: 'broccoli' });
     expect(f.ledger.cost.seed).toBeCloseTo(cb.seedG * cb.seedYenPerG);
     expect(f.ledger.cost.medium).toBe(BUSINESS.mediumYenPerTray);
-    expect(applyFarmCommand(f, { type: 'sow', rack: R, slot: 0, crop: 'radish' })).toBe(false);
+    expect(applyFarmCommand(f, { type: 'sow', rack: R, slot: 0, crop: 'broccoli' })).toBe(false);
     expect(applyFarmCommand(f, { type: 'harvest', rack: R, slot: 0 })).toBe(false);
-    run(f, CROPS.radish.days * 24 * 1.05, keepInBand);
+    run(f, CROPS.broccoli.days * 24 * 1.05, keepInBand);
     expect(f.racks[0].slots[0]!.ripeAt).not.toBeNull();
     expect(applyFarmCommand(f, { type: 'harvest', rack: R, slot: 0 })).toBe(true);
     expect(f.stock).toHaveLength(1);
     expect(f.stock[0].grade).toBe('S');
     expect(f.stock[0].grams).toBeCloseTo(cb.trayYieldG, 0);
-    const before = f.cash;
-    applyFarmCommand(f, { type: 'wholesale' });
+    const before = f.cash, g = f.stock[0].grams;
+    expect(reserved(f).broccoli).toBeUndefined();
+    expect(applyFarmCommand(f, { type: 'wholesale' })).toBe(true);
     expect(f.stock).toHaveLength(0);
-    expect(f.ledger.revenue.wholesale).toBeGreaterThan(0);
-    expect(f.cash).toBeCloseTo(before + f.ledger.revenue.wholesale - (cb.trayYieldG / 100) * BUSINESS.channels.wholesale.packYenPer100g, 0);
+    expect(f.ledger.revenue.wholesale).toBeCloseTo((g / 100) * cb.retailPer100g * BUSINESS.channels.wholesale.priceMult * 1.2, 6);
+    expect(f.cash).toBeCloseTo(before + f.ledger.revenue.wholesale - (g / 100) * BUSINESS.channels.wholesale.packYenPer100g, 6);
+  });
+
+  test('卸に出しても明日・あさっての納品の取り置きは残り、作物を選んで出せる', () => {
+    const f = createFarm();
+    applyFarmCommand(f, { type: 'sow', rack: R, slot: 0, crop: 'radish' });
+    applyFarmCommand(f, { type: 'sow', rack: R, slot: 1, crop: 'radish' });
+    applyFarmCommand(f, { type: 'sow', rack: R, slot: 2, crop: 'broccoli' });
+    // ビストロ（ラディッシュ、Day 11 から週1）の納品の前日まで回して収穫する
+    run(f, 24 * 9 + 9, keepInBand);
+    harvestRipe(f);
+    const stockOf = (crop: string) => f.stock.filter(l => l.crop === crop).reduce((a, l) => a + l.grams, 0);
+    const keep = reserved(f).radish;
+    expect(keep).toBe(BUSINESS.contracts.find(c => c.id === 'bistro')!.grams);
+    expect(stockOf('radish')).toBeGreaterThan(keep);
+    // ラディッシュだけ出す：取り置きの分だけ残り、ブロッコリーには手を付けない
+    const broccoli = stockOf('broccoli');
+    expect(applyFarmCommand(f, { type: 'wholesale', crop: 'radish' })).toBe(true);
+    expect(stockOf('radish')).toBeCloseTo(keep, 6);
+    expect(stockOf('broccoli')).toBeCloseTo(broccoli, 6);
+    // 取り置きしか残っていなければ何も出せない
+    expect(applyFarmCommand(f, { type: 'wholesale', crop: 'radish' })).toBe(false);
+  });
+
+  test('契約の単価：豆苗も若芽としてフレンチに納めればマイクロハーブ並みの値段になる', () => {
+    const french = BUSINESS.contracts.find(c => c.id === 'french')!;
+    expect(french.crop).toBe('pea');
+    const retail = BUSINESS.crops.pea.retailPer100g * BUSINESS.channels.restaurant.priceMult;
+    expect(french.pricePer100g).toBeGreaterThan(retail * 10);
   });
 
   test('日持ちを過ぎた在庫は廃棄になり、冷蔵庫で延びる', () => {
@@ -122,7 +152,7 @@ describe('経営モード（Phase 4）', () => {
     const f = createFarm();
     run(f, 24 * 28);
     const lost = f.log.filter(e => e.kind === 'contractLost').map(e => e.kind === 'contractLost' && e.contract);
-    expect(lost.sort()).toEqual(['bistro', 'cafe', 'hotel']);
+    expect(lost.sort()).toEqual(['bistro', 'cafe', 'french', 'hotel']);
     expect(Object.values(f.contracts).every(c => c.lost)).toBe(true);
   });
 
@@ -183,9 +213,9 @@ describe('経営モード（Phase 4）', () => {
 
   test('1か月回せる：納品日から逆算して播けば、契約を守って黒字の月次損益が出る', () => {
     const f = createFarm();
-    // ひまわりは棚を分ける（アブラナ科と同じ養液だと EC が適正の上端を超えて遅れ、3回目の納品に間に合わない）
+    // ひまわり・豆苗（EC の適正が 1.2 まで）は棚を分ける。アブラナ科（1.0 から）と同じ養液だと重なりが狭く、遅れて納品に間に合わない
     applyFarmCommand(f, { type: 'buy', item: 'rack' });
-    const rackFor = (crop: string) => (crop === 'sunflower' ? 'rack2' : R);
+    const rackFor = (crop: string) => (crop === 'sunflower' || crop === 'pea' ? 'rack2' : R);
     run(f, 24 * BUSINESS.monthDays, f => {
       keepInBand(f);
       harvestRipe(f);
