@@ -5,7 +5,7 @@ import businessJson from '../data/business.json';
 import { execute, type Command } from './commands';
 import { fill, findCompartment, type Compartment, type Solution } from './compartment';
 import { CROPS, FACTORS, MEASURE, exchange, fitness, gradeOf, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
-import { limiting } from './fitness';
+import { limiting, side } from './fitness';
 
 // ---- データ（business.json） ----
 
@@ -48,6 +48,8 @@ export interface Contract {
   pricePer100g?: number;
   /** 契約の説明（画面用） */
   note?: string;
+  /** 申し出（offers）だけ：この評判に達したら申し出が来る */
+  needRep?: number;
 }
 
 export interface Equipment {
@@ -91,6 +93,11 @@ export interface Business {
   directDemandGPerDay: number;
   channels: Record<'wholesale' | 'restaurant' | 'direct', Channel>;
   contracts: Contract[];
+  /** 評判で来る新しい取引先の申し出。受けると契約になる（startDay は受けた日＋offerLeadDays） */
+  offers: Contract[];
+  offerLeadDays: number;
+  /** 評判の増減：納品できた・欠品・契約が切れた */
+  reputation: { delivery: number; miss: number; lost: number };
   equipment: Record<EquipmentId, Equipment>;
   crops: Record<string, CropBusiness>;
 }
@@ -153,13 +160,29 @@ export type FarmCommand =
   | { type: 'measure' }
   /** 在庫を卸に出す（crop を指定するとその作物だけ）。明日・あさっての納品の取り置きは残す */
   | { type: 'wholesale'; crop?: string }
-  | { type: 'buy'; item: EquipmentId };
+  | { type: 'buy'; item: EquipmentId }
+  /** 申し出を受ける・断る */
+  | { type: 'accept'; offer: string }
+  | { type: 'decline'; offer: string };
+
+/**
+ * 欠品の原因（sim が特定し、文言は画面が作る）。notHarvested＝育ち終えたトレイを収穫していない、died＝枯れた・育ちすぎで売れなくなった、
+ * expired＝収穫が早すぎて日持ちが切れた、slow＝間に合う日に播いたが育ちが遅れた、sownLate＝播くのが遅い、
+ * lowYield＝収穫した量が足りない、soldOff＝取り置きより前に卸に出した、notSown＝播いていない
+ */
+export type ShortCause = 'notHarvested' | 'died' | 'expired' | 'slow' | 'sownLate' | 'lowYield' | 'soldOff' | 'notSown';
 
 export type FarmEvent =
   | { hour: number; kind: 'command'; command: FarmCommand; auto?: boolean }
   | { hour: number; kind: 'harvest'; rack: string; slot: number; crop: string; grams: number; grade: Grade }
-  | { hour: number; kind: 'dead'; rack: string; slot: number; crop: string; reason: 'health' | 'overgrown' }
-  | { hour: number; kind: 'delivery'; contract: string; grams: number; short: number; yen: number }
+  /** 枯れた。health のときは律速因子とその向き（枯れた原因の症状） */
+  | { hour: number; kind: 'dead'; rack: string; slot: number; crop: string; reason: 'health' | 'overgrown'; factor?: Factor; side?: 'low' | 'high' }
+  /** 納品。欠品（1割を超える不足）なら cause に原因 */
+  | { hour: number; kind: 'delivery'; contract: string; grams: number; short: number; yen: number; cause?: ShortCause }
+  /** 観察メモ：棚の苗に症状が続いた（律速因子の適合度 0.7 未満が3時間）。crop は一番弱っているトレイの作物 */
+  | { hour: number; kind: 'advice'; rack: string; crop: string; factor: Factor; side: 'low' | 'high' }
+  /** 新しい取引先からの申し出 */
+  | { hour: number; kind: 'offer'; offer: string }
   | { hour: number; kind: 'contractLost'; contract: string }
   | { hour: number; kind: 'direct'; grams: number; yen: number }
   | { hour: number; kind: 'expired'; crop: string; grams: number }
@@ -175,8 +198,14 @@ export interface FarmState {
   equipment: Record<EquipmentId, number>;
   /** 買った設備と買った月（減価償却に使う） */
   assets: { item: EquipmentId; month: number }[];
-  /** 契約ごとの欠品回数（契約が切れたら lost） */
-  contracts: Record<string, { misses: number; lost: boolean }>;
+  /** 契約ごとの欠品回数（契約が切れたら lost）。申し出から結んだ契約は最初の納品日 startDay を持つ */
+  contracts: Record<string, { misses: number; lost: boolean; startDay?: number }>;
+  /** 評判（納品で上がり、欠品で下がる。0 以上） */
+  reputation: number;
+  /** 申し出の状態 */
+  offers: Record<string, 'pending' | 'accepted' | 'declined'>;
+  /** 観察メモの判定（棚ごと）：症状が続いた時間と、その症状、症状ごとに最後にメモを出した時刻 */
+  watch: Record<string, { low: number; key: string; last: Record<string, number> }>;
   /** 今月の損益（締めると months に移る） */
   ledger: Ledger;
   months: Ledger[];
@@ -187,6 +216,10 @@ export interface FarmState {
 }
 
 const RACK_PREFIX = 'rack';
+/** 観察メモ：適合度がこれ未満の時間が WATCH_HOURS 続いたら出す。同じ症状は WATCH_INTERVAL あける（栽培モードと同じ） */
+const WATCH_LOW = 0.7, WATCH_HOURS = 3, WATCH_INTERVAL = 24;
+/** 欠品の原因を探すときにさかのぼる時間（1週間） */
+const LOOKBACK = 24 * 7;
 /** 取り置きの日数（何日先の納品まで直売に回さないか） */
 const RESERVE_DAYS = 2;
 
@@ -211,6 +244,7 @@ function addRack(f: FarmState, b: Business): void {
   f.compartments.push(c);
   f.racks.push({ id, slots: Array(b.slotsPerRack).fill(null) });
   f.readings[id] = { ec: 0, ph: 0, water: 0 };
+  f.watch[id] = { low: 0, key: '', last: {} };
 }
 
 export function createFarm(opts: { seed?: number; business?: Business } = {}): FarmState {
@@ -218,7 +252,7 @@ export function createFarm(opts: { seed?: number; business?: Business } = {}): F
   const f: FarmState = {
     hour: 0, rng: (opts.seed ?? 1) >>> 0, cash: b.startCash, compartments: [], racks: [], stock: [],
     equipment: { rack: 0, autoWater: 0, autoPh: 0, probe: 0, fridge: 0, led: 0 }, assets: [],
-    contracts: Object.fromEntries(b.contracts.map(c => [c.id, { misses: 0, lost: false }])),
+    contracts: Object.fromEntries(b.contracts.map(c => [c.id, { misses: 0, lost: false }])), reputation: 0, offers: {}, watch: {},
     ledger: newLedger(1), months: [], readings: {}, readAt: 0, log: [],
   };
   addRack(f, b);
@@ -266,6 +300,19 @@ export function freshness(t: Tray, hour: number, b: Business = BUSINESS): number
   return over <= 0 ? 1 : Math.max(0, 1 - b.overgrowLossPerDay * over);
 }
 
+/** 結んでいる契約（最初からの契約と、受けた申し出。切れた契約も含む）。startDay は状態のものを使う */
+export function contractsOf(f: FarmState, b: Business = BUSINESS): Contract[] {
+  return [...b.contracts, ...b.offers.filter(o => f.offers[o.id] === 'accepted')]
+    .map(c => ({ ...c, startDay: f.contracts[c.id]?.startDay ?? c.startDay }));
+}
+
+/** 契約・申し出を id で探す（画面用） */
+export const contractById = (id: string, b: Business = BUSINESS): Contract => {
+  const c = [...b.contracts, ...b.offers].find(x => x.id === id);
+  if (!c) throw new Error(`契約 ${id} がありません`);
+  return c;
+};
+
 const unitPrice = (b: Business, crop: string, ch: keyof Business['channels'], contract?: Contract) =>
   contract?.pricePer100g ?? b.crops[crop].retailPer100g * b.channels[ch].priceMult;
 
@@ -276,11 +323,15 @@ export function farmTick(f: FarmState, b: Business = BUSINESS): void {
   for (const r of f.racks) {
     const bed = findCompartment(f.compartments, r.id), n = b.slotsPerRack;
     let dWater = 0, dSalts = 0, dPh = 0;
+    /** 棚で一番弱っている苗（観察メモ用） */
+    let weak: { value: number; key: string; crop: string } | null = null;
     for (let i = 0; i < r.slots.length; i++) {
       const t = r.slots[i];
       if (!t || t.crop.health <= 0) continue;
       const spec = CROPS[t.crop.id], c = share(bed, n), before = { w: c.water, s: c.solutes.salts, ph: c.ph };
       const lim = limiting(FACTORS, fitness(spec, c));
+      const sd = side(MEASURE[lim.key](c), spec.bands[lim.key]);
+      if (!weak || lim.value < weak.value) weak = { value: lim.value, key: `${lim.key}.${sd}`, crop: t.crop.id };
       exchange(t.crop, spec, c);
       dWater += c.water - before.w;
       dSalts += c.solutes.salts - before.s;
@@ -294,12 +345,13 @@ export function farmTick(f: FarmState, b: Business = BUSINESS): void {
         grow(t.crop, spec, lim.value);
         t.crop.qualitySum = q;
       }
-      if (t.crop.health <= 0) kill(f, r, i, 'health');
+      if (t.crop.health <= 0) kill(f, r, i, 'health', lim.key, sd);
       else if (t.ripeAt !== null && (f.hour + 1 - t.ripeAt) / 24 > b.crops[t.crop.id].windowDays + b.overgrowDiscardDays) kill(f, r, i, 'overgrown');
     }
     bed.water = Math.max(0.05 * n, bed.water + dWater);
     bed.solutes.salts = Math.max(0, bed.solutes.salts + dSalts);
     bed.ph += dPh;
+    watch(f, r.id, weak);
   }
   f.hour++;
   automate(f, b);
@@ -308,10 +360,24 @@ export function farmTick(f: FarmState, b: Business = BUSINESS): void {
 }
 
 /** 枯れたトレイは片付けるまで場所をふさぐ（作物の状態は残し、health ≤ 0 で枯死を表す） */
-function kill(f: FarmState, r: Rack, slot: number, reason: 'health' | 'overgrown') {
+function kill(f: FarmState, r: Rack, slot: number, reason: 'health' | 'overgrown', factor?: Factor, sd?: 'low' | 'high') {
   const t = r.slots[slot]!;
   t.crop.health = 0;
-  f.log.push({ hour: f.hour + 1, kind: 'dead', rack: r.id, slot, crop: t.crop.id, reason });
+  f.log.push({ hour: f.hour + 1, kind: 'dead', rack: r.id, slot, crop: t.crop.id, reason, ...(factor && { factor, side: sd }) });
+}
+
+/** 観察メモ：棚で一番弱っている苗の症状が WATCH_HOURS 続いたら出す（見た目で分かる症状。値は計器で測らないと分からない） */
+function watch(f: FarmState, rack: string, weak: { value: number; key: string; crop: string } | null) {
+  const w = f.watch[rack];
+  if (!weak || weak.value >= WATCH_LOW) { w.low = 0; w.key = ''; return; }
+  if (weak.key !== w.key) { w.key = weak.key; w.low = 0; }
+  w.low++;
+  const hour = f.hour + 1;
+  if (w.low >= WATCH_HOURS && hour - (w.last[weak.key] ?? -Infinity) >= WATCH_INTERVAL) {
+    w.last[weak.key] = hour;
+    const [factor, sd] = weak.key.split('.') as [Factor, 'low' | 'high'];
+    f.log.push({ hour, kind: 'advice', rack, crop: weak.crop, factor, side: sd });
+  }
 }
 
 /** 設備による自動の操作（自動給水・pH 自動調整）。操作はコマンドとして実行し、記録に auto を付ける */
@@ -352,17 +418,31 @@ function daily(f: FarmState, b: Business): void {
   });
   // 今日（これから始まる日）の納品。Day 1 の曜日が 0
   const weekday = (farmDay(f) - 1) % 7;
-  for (const c of b.contracts) {
+  for (const c of contractsOf(f, b)) {
     const st = f.contracts[c.id];
     if (st.lost || c.weekday !== weekday || farmDay(f) < c.startDay) continue;
     const { grams, yen } = take(f, b, c.crop, c.grams, 'restaurant', {}, c);
     const short = c.grams - grams;
-    f.log.push({ hour: f.hour, kind: 'delivery', contract: c.id, grams, short, yen });
     // 1 割までの不足は許してもらえる
-    if (short > c.grams * 0.1 && ++st.misses >= c.maxMisses) {
+    if (short <= c.grams * 0.1) {
+      f.log.push({ hour: f.hour, kind: 'delivery', contract: c.id, grams, short, yen });
+      f.reputation += b.reputation.delivery;
+      continue;
+    }
+    f.log.push({ hour: f.hour, kind: 'delivery', contract: c.id, grams, short, yen, cause: shortCause(f, c, grams) });
+    f.reputation = Math.max(0, f.reputation + b.reputation.miss);
+    if (++st.misses >= c.maxMisses) {
       st.lost = true;
+      f.reputation = Math.max(0, f.reputation + b.reputation.lost);
       f.log.push({ hour: f.hour, kind: 'contractLost', contract: c.id });
     }
+  }
+  // 評判が上がったら新しい取引先から申し出が来る（1つずつ。断った申し出はもう来ない）
+  for (const o of b.offers) {
+    if (f.offers[o.id] || f.reputation < (o.needRep ?? 0)) continue;
+    f.offers[o.id] = 'pending';
+    f.log.push({ hour: f.hour, kind: 'offer', offer: o.id });
+    break;
   }
   // 直売：1日の需要まで、作物によらず古い在庫から売れる。契約の納品分（取り置き）には手を付けない
   const d = take(f, b, null, b.directDemandGPerDay, 'direct', reserved(f, b));
@@ -370,10 +450,28 @@ function daily(f: FarmState, b: Business): void {
   if (f.hour % (24 * b.monthDays) === 0) closeMonth(f, b);
 }
 
+/** 欠品の原因を探す（優先の高い順）。delivered はこの納品で出せた量 */
+function shortCause(f: FarmState, c: Contract, delivered: number): ShortCause {
+  const trays = f.racks.flatMap(r => r.slots).filter((t): t is Tray => !!t && t.crop.id === c.crop);
+  if (trays.some(t => t.crop.health > 0 && t.ripeAt !== null)) return 'notHarvested';
+  const since = f.hour - LOOKBACK, recent = f.log.filter(e => e.hour >= since);
+  if (recent.some(e => e.kind === 'dead' && e.crop === c.crop)) return 'died';
+  if (recent.some(e => e.kind === 'expired' && e.crop === c.crop)) return 'expired';
+  const growing = trays.filter(t => t.crop.health > 0);
+  if (growing.length) {
+    // 一番育っているトレイが、順調なら今までに育ち終えていたか
+    const best = growing.reduce((a, t) => (t.crop.growth > a.crop.growth ? t : a));
+    return best.sownAt + CROPS[c.crop].days * 24 <= f.hour ? 'slow' : 'sownLate';
+  }
+  if (delivered > 0) return 'lowYield';
+  if (recent.some(e => e.kind === 'command' && e.command.type === 'wholesale' && (!e.command.crop || e.command.crop === c.crop))) return 'soldOff';
+  return 'notSown';
+}
+
 /** 取り置き：明日・あさっての納品に要る量（作物ごと、続いている契約だけ）。それより先の分まで取っておくと日持ちが切れる */
 export function reserved(f: FarmState, b: Business = BUSINESS): Record<string, number> {
   const out: Record<string, number> = {}, today = farmDay(f);
-  for (const c of b.contracts) {
+  for (const c of contractsOf(f, b)) {
     if (f.contracts[c.id].lost) continue;
     // 次の納品日（今日の納品はもう済んでいる）
     let D = Math.max(today + 1, c.startDay);
@@ -518,6 +616,12 @@ function perform(f: FarmState, b: Business, cmd: FarmCommand): boolean {
       if (cmd.item === 'rack') addRack(f, b);
       return true;
     }
+    case 'accept': case 'decline': {
+      if (f.offers[cmd.offer] !== 'pending') return false;
+      f.offers[cmd.offer] = cmd.type === 'accept' ? 'accepted' : 'declined';
+      if (cmd.type === 'accept') f.contracts[cmd.offer] = { misses: 0, lost: false, startDay: farmDay(f) + b.offerLeadDays };
+      return true;
+    }
   }
 }
 
@@ -551,7 +655,7 @@ export interface TrayEstimate {
 }
 
 /** 作物ごとの1トレイの損益見込み（等級 A・健康に育った場合）。eq は持っている設備（省エネ LED・業務用冷蔵庫が効く） */
-export function trayEstimate(crop: string, b: Business = BUSINESS, eq: Partial<Record<EquipmentId, number>> = {}): TrayEstimate {
+export function trayEstimate(crop: string, b: Business = BUSINESS, eq: Partial<Record<EquipmentId, number>> = {}, contracts: Contract[] = b.contracts): TrayEstimate {
   const cb = b.crops[crop], days = CROPS[crop].days, g = cb.trayYieldG, led = !!eq.led;
   const shelf = cb.shelfDays * (eq.fridge ? b.fridgeShelfMult : 1);
   const seed = cb.seedG * cb.seedYenPerG, medium = b.mediumYenPerTray;
@@ -565,7 +669,7 @@ export function trayEstimate(crop: string, b: Business = BUSINESS, eq: Partial<R
     return { kind, ...(contract && { contract: contract.id }), grams: x, net: n, profit: n - total };
   };
   const outlets: TrayOutlet[] = [
-    ...b.contracts.filter(c => c.crop === crop).map(c => outlet('contract', c.grams, 'restaurant', c)),
+    ...contracts.filter(c => c.crop === crop).map(c => outlet('contract', c.grams, 'restaurant', c)),
     outlet('wholesale', g, 'wholesale'),
     // 直売の需要は作物によらず合計なので、ほかの在庫と取り合う。ここでは1トレイが独り占めした場合
     outlet('direct', b.directDemandGPerDay * shelf, 'direct'),

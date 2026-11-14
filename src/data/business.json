@@ -25,6 +25,13 @@
     { "id": "hotel", "name": "ホテルの厨房", "crop": "broccoli", "grams": 300, "weekday": 1, "startDay": 12, "maxMisses": 2 },
     { "id": "french", "name": "フレンチ", "crop": "pea", "grams": 100, "weekday": 2, "startDay": 14, "maxMisses": 2, "pricePer100g": 1200, "note": "豆苗を巻きひげつきの若芽として料理の飾りに使う。量は少ないが、単価はマイクロハーブと同じ" }
   ],
+  "offers": [
+    { "id": "deli", "name": "総菜店", "crop": "broccoli", "grams": 200, "weekday": 4, "startDay": 0, "maxMisses": 2, "needRep": 4, "note": "サラダの彩りに使う。量は少なめ" },
+    { "id": "sushi", "name": "寿司店", "crop": "radish", "grams": 200, "weekday": 0, "startDay": 0, "maxMisses": 2, "needRep": 8, "note": "ラディッシュの辛みを刺身のつまに使う" },
+    { "id": "buffet", "name": "ホテルのビュッフェ", "crop": "sunflower", "grams": 1000, "weekday": 3, "startDay": 0, "maxMisses": 2, "needRep": 14, "note": "量が多い。棚を増やさないと回らない" }
+  ],
+  "offerLeadDays": 7,
+  "reputation": { "delivery": 1, "miss": -2, "lost": -4 },
   "equipment": {
     "rack": { "name": "棚の増設", "price": 80000, "lifeMonths": 60, "note": "トレイ8枚分の棚・LED・栽培槽を1台足す。電気代も1台分増える" },
     "autoWater": { "name": "自動給水", "price": 15000, "lifeMonths": 36, "note": "液量が減ったら水を足す（フロート弁）。水の手間と液量不足がなくなる" },

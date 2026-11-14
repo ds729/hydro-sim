@@ -2,10 +2,12 @@
 // 帳簿（設備・月次損益・1トレイの見込み）は図鑑と同じ重ねた窓に出す。文言はここで作り、sim はイベントと数値だけを出す
 
 import {
-  BUSINESS, CROPS, applyFarmCommand, canBuy, createSim, farmDay, freshness, rackValues, reserved, totals, trayEstimate,
-  type Band, type EquipmentId, type Factor, type FarmCommand, type FarmEvent, type FarmState, type Ledger, type SimState, type Tray,
+  BUSINESS, CROPS, applyFarmCommand, canBuy, contractById, contractsOf, createSim, farmDay, freshness, rackValues, reserved, totals, trayEstimate,
+  type Band, type Contract, type EquipmentId, type Factor, type FarmCommand, type FarmState, type Ledger, type ShortCause,
+  type SimState, type Tray,
 } from '../sim';
 import { shortName } from './result';
+import { SYMPTOMS } from './symptoms';
 
 const $ = (id: string) => document.getElementById(id)!;
 const B = BUSINESS;
@@ -54,7 +56,7 @@ export class FarmPanel {
     $('fbk').onclick = () => this.openBook('pl');
     $('bk').onclick = e => { if (e.target === $('bk')) this.closeBook(); };
     // 在庫・契約・トレイの操作は書き換わる中身なので、押したボタンは data 属性で見分ける
-    for (const id of ['fda', 'fst', 'frk', 'bp']) $(id).addEventListener('click', e => this.onClick(e));
+    for (const id of ['fda', 'fst', 'fct', 'frk', 'bp']) $(id).addEventListener('click', e => this.onClick(e));
     this.seenLog = f.log.length;
   }
 
@@ -89,6 +91,7 @@ export class FarmPanel {
       const slots = d.all ? r.slots.map((t, i) => (kindOf(t) === want ? i : -1)).filter(i => i >= 0) : [this.slot];
       for (const i of slots) this.send({ type: d.act, rack: r.id, slot: i });
     } else if (d.ws) this.send({ type: 'wholesale', crop: d.ws });
+    else if (d.offer) this.send({ type: d.ans === 'accept' ? 'accept' : 'decline', offer: d.offer });
     else if (d.buy) {
       const e = B.equipment[d.buy as EquipmentId];
       if (confirm(`${e.name}を ${yen(e.price)} で買いますか？`)) this.send({ type: 'buy', item: d.buy as EquipmentId });
@@ -173,7 +176,7 @@ export class FarmPanel {
     if (!t) {
       info = `<b>${where}</b>：空き。播く作物を選ぶ（種と培地の費用。下は1トレイの見込み利益の最大）`;
       act = '<div class="g">' + Object.keys(B.crops).map(id => {
-        const e = trayEstimate(id, B, f.equipment), best = Math.max(...e.outlets.map(o => o.profit));
+        const e = trayEstimate(id, B, f.equipment, contractsOf(f).filter(c => !f.contracts[c.id].lost)), best = Math.max(...e.outlets.map(o => o.profit));
         return `<button data-sow="${id}" title="${CROPS[id].note}">${cropName(id)}<small>${yen(e.cost.seed + e.cost.medium)} → 最大${signed(best)}</small></button>`;
       }).join('') + `</div><label class="fa"><input type="checkbox" id="fsa">空きトレイ（${count('empty')}枚）全部に播く</label>`;
     } else {
@@ -211,17 +214,21 @@ export class FarmPanel {
         + (free > 0.5 ? `<button data-ws="${id}">卸に出す ${free.toFixed(0)}g</button>` : '') + '</div>';
     }).join('');
     setHtml($('fst'), stock || '<small>なし（直売は毎日 古い在庫から売れる）</small>');
-    // 契約：次の納品日・欠品
-    const today = farmDay(f);
-    setHtml($('fct'), B.contracts.map(c => {
+    // 契約：評判、届いている申し出（受ける・断る）、結んでいる契約の次の納品日・欠品
+    const today = farmDay(f), terms = (c: Contract) => `${cropName(c.crop)} ${c.grams}g・毎週${WD[c.weekday]}`;
+    $('frp').textContent = `評判 ${f.reputation}`;
+    const offers = B.offers.filter(o => f.offers[o.id] === 'pending').map(o =>
+      `<div class="fs fo2"><b>📨 ${o.name}</b> ${terms(o)}<small>${o.pricePer100g ? `${yen(o.pricePer100g)}/100g・` : ''}${o.note ?? ''}。受けると Day ${today + B.offerLeadDays} から納品</small>`
+      + `<div class="g"><button data-offer="${o.id}" data-ans="accept" class="on">受ける</button><button data-offer="${o.id}" data-ans="decline">断る</button></div></div>`).join('');
+    setHtml($('fct'), offers + contractsOf(f).map(c => {
       const st = f.contracts[c.id];
       let next = Math.max(today + 1, c.startDay);
       while ((next - 1) % 7 !== c.weekday) next++;
       const status = st.lost ? '<em class="ng">契約切れ</em>' : `次 Day ${next}（あと${next - today}日）`;
-      return `<div class="fs${st.lost ? ' lost' : ''}" title="${c.note ?? ''}"><b>${c.name}</b> ${cropName(c.crop)} ${c.grams}g・毎週${WD[c.weekday]}`
+      return `<div class="fs${st.lost ? ' lost' : ''}" title="${c.note ?? ''}"><b>${c.name}</b> ${terms(c)}`
         + `<small>${c.pricePer100g ? `${yen(c.pricePer100g)}/100g・` : ''}${status}・欠品 ${st.misses}/${c.maxMisses}</small></div>`;
     }).join(''));
-    setHtml($('flg'), logHtml(f.log));
+    setHtml($('flg'), logHtml(f));
   }
 
   // ---- 帳簿 ----
@@ -261,12 +268,29 @@ export class FarmPanel {
   }
 }
 
-/** 経営の記録（新しい順）。養液の操作と測定は多いので出さない。同じ時刻の同じ記録はまとめる */
-function logHtml(log: FarmEvent[]): string {
-  const rows: { hour: number; text: string; n: number; cls?: string }[] = [];
-  const spot = (rack: string, slot: number) => `棚${rack.replace(/\D/g, '')}-${slot + 1}`;
-  for (const e of log) {
-    let text = '', cls: string | undefined;
+/** 欠品の原因と対処（観察メモ） */
+const SHORT: Record<ShortCause, [string, string]> = {
+  notHarvested: ['育ち終えたトレイを収穫していなかった。収穫して在庫にしないと納品できない。', '収穫できるトレイ（黄色の枠）は早めに収穫する。在庫は日持ちの間なら納品に使える。'],
+  died: ['この作物のトレイが枯れた（または育ちすぎて売れなくなった）。', '枯れた原因（記録の 🥀）を直す。納品に要る枚数より1枚多く播いておくと、1枚だめになっても間に合う。'],
+  expired: ['収穫が早すぎて、納品日の前に日持ちが切れた。', '納品日の 0〜2日前に育ち終わるよう、播く日をずらす。業務用冷蔵庫があれば日持ちが延びる。'],
+  slow: ['間に合う日に播いたが、育ちが遅れた。養液が適正帯から外れていた時間が長い。', 'EC・pH・液量を適正帯に保つ（🔍 測るで確かめる）。適正帯の違う作物を同じ棚に混ぜない。'],
+  sownLate: ['播くのが遅く、納品日までに育ち終わらなかった。', '納品日から「育つ日数＋1〜2日」さかのぼって播く（育つ日数は帳簿の見込み）。'],
+  lowYield: ['収穫した量が納品量に足りなかった。', '1トレイの収量は等級と健康で変わる。納品量に対して余裕のある枚数を播く。'],
+  soldOff: ['取り置き（納品の2日前から）より前に、在庫を卸に出していた。', '卸に出すのは、次の納品に要る分を残してから。'],
+  notSown: ['この作物を播いていなかった。', '☰ の契約で次の納品日を見て、そこから育つ日数をさかのぼって播く。'],
+};
+
+/** 原因・結果・対処の行（栽培日誌の観察メモと同じ形） */
+const memo = (cause: string, fix: string, result?: string) =>
+  `<div class="jw"><i>原因</i>${cause}</div>${result ? `<div class="jw"><i>結果</i>${result}</div>` : ''}<div class="jw"><i>対処</i>${fix}</div>`;
+
+/** 経営の記録（新しい順）。養液の操作と測定は多いので出さない。同じ時刻の同じ記録はまとめる。欠品・廃棄・枯死・症状は原因と対処を付ける */
+function logHtml(f: FarmState): string {
+  const rows: { hour: number; text: string; n: number; cls?: string; memo?: string }[] = [];
+  const spot = (rack: string, slot?: number) => `棚${rack.replace(/\D/g, '')}${slot === undefined ? '' : `-${slot + 1}`}`;
+  const shelf = (crop: string) => B.crops[crop].shelfDays * (f.equipment.fridge ? B.fridgeShelfMult : 1);
+  for (const e of f.log) {
+    let text = '', cls: string | undefined, note: string | undefined;
     switch (e.kind) {
       case 'command': {
         const c = e.command;
@@ -274,28 +298,62 @@ function logHtml(log: FarmEvent[]): string {
         else if (c.type === 'clear') text = '🧹 枯れたトレイを片付けた';
         else if (c.type === 'wholesale') text = `📦 ${c.crop ? cropName(c.crop) : '在庫'}を卸に出した`;
         else if (c.type === 'buy') { text = `🛒 ${B.equipment[c.item].name}を買った（${yen(B.equipment[c.item].price)}）`; cls = 'o'; }
+        else if (c.type === 'accept') { const o = contractById(c.offer); text = `🤝 ${o.name}と契約した（Day ${f.contracts[o.id].startDay} から毎週${WD[o.weekday]}）`; cls = 'o'; }
+        else if (c.type === 'decline') text = `${contractById(c.offer).name}の申し出を断った`;
         break;
       }
       case 'harvest': text = `🧺 ${cropName(e.crop)}を収穫（等級 ${e.grade}）`; break;
       case 'delivery': {
-        const c = B.contracts.find(x => x.id === e.contract)!;
-        if (e.short > c.grams * 0.1) { text = `⚠️ ${c.name}に欠品（${e.grams.toFixed(0)}/${c.grams}g）`; cls = 'ng'; }
-        else text = `🚚 ${c.name}に納品 ${e.grams.toFixed(0)}g ${yen(e.yen)}`;
+        const c = contractById(e.contract);
+        if (e.cause) {
+          text = `⚠️ ${c.name}に欠品（${e.grams.toFixed(0)}/${c.grams}g ${cropName(c.crop)}）`;
+          cls = 'ng';
+          note = memo(...SHORT[e.cause]);
+        } else text = `🚚 ${c.name}に納品 ${e.grams.toFixed(0)}g ${yen(e.yen)}`;
         break;
       }
-      case 'contractLost': text = `❌ ${B.contracts.find(x => x.id === e.contract)!.name}との契約が切れた`; cls = 'ng'; break;
+      case 'contractLost': text = `❌ ${contractById(e.contract).name}との契約が切れた（評判が下がった）`; cls = 'ng'; break;
+      case 'offer': {
+        const o = contractById(e.offer);
+        text = `📨 ${o.name}から取引の申し出（${cropName(o.crop)} ${o.grams}g・毎週${WD[o.weekday]}）`;
+        cls = 'o';
+        note = '<div class="jw"><i>なぜ</i>納品を守って評判が上がった。☰ の契約で受けるか断る。</div>';
+        break;
+      }
       case 'direct': text = `🏪 直売 ${e.grams.toFixed(0)}g ${yen(e.yen)}`; break;
-      case 'expired': text = `🗑 ${cropName(e.crop)} ${e.grams.toFixed(0)}g が日持ち切れで廃棄`; cls = 'ng'; break;
-      case 'dead': text = `🥀 ${spot(e.rack, e.slot)} ${cropName(e.crop)}が${e.reason === 'health' ? '枯れた' : '育ちすぎて売れなくなった'}`; cls = 'ng'; break;
+      case 'expired':
+        text = `🗑 ${cropName(e.crop)} ${e.grams.toFixed(0)}g が日持ち切れで廃棄`;
+        cls = 'ng';
+        note = memo(`売り先がないまま日持ち（${shelf(e.crop).toFixed(0)}日）が過ぎた。直売は1日 ${B.directDemandGPerDay}g しか売れない。`,
+          `播く量を売れる量（契約＋直売）に合わせる。余りそうなら早めに卸に出す${f.equipment.fridge ? '' : '。業務用冷蔵庫で日持ちが延びる'}。`);
+        break;
+      case 'dead': {
+        text = `🥀 ${spot(e.rack, e.slot)} ${cropName(e.crop)}が${e.reason === 'health' ? '枯れた' : '育ちすぎて売れなくなった'}`;
+        cls = 'ng';
+        if (e.reason === 'overgrown') {
+          note = memo(`育ち終えてから収穫しないまま、適期（${B.crops[e.crop].windowDays}日）を ${B.overgrowDiscardDays}日過ぎた。`, '育ち終えたら適期の間に収穫する。収穫しきれないなら播く枚数を減らす。');
+        } else if (e.factor) {
+          const sy = SYMPTOMS[`${e.factor}.${e.side}`];
+          note = memo(`${sy.icon} ${sy.label}（${sy.name}）が続いた。${sy.natural}`, `${sy.fix}棚の養液は8枚で共通なので、同じ棚のほかの苗も弱る。`);
+        }
+        break;
+      }
+      case 'advice': {
+        const sy = SYMPTOMS[`${e.factor}.${e.side}`];
+        text = `🔍 ${spot(e.rack)}：${cropName(e.crop)}に${sy.name}のサイン`;
+        cls = 'o';
+        note = memo(`${sy.label}（${sy.name}）かもしれない。${sy.natural}`, `🔍 測るで値を確かめてから、${sy.fix}`, sy.look);
+        break;
+      }
       case 'month': text = `📅 ${e.ledger.month}か月目を締めた：利益 ${signed(totals(e.ledger).profit)}`; cls = 'o'; break;
     }
     if (!text) continue;
     const last = rows.at(-1);
-    if (last && last.hour === e.hour && last.text === text) last.n++;
-    else rows.push({ hour: e.hour, text, n: 1, cls });
+    if (last && last.hour === e.hour && last.text === text && !note) last.n++;
+    else rows.push({ hour: e.hour, text, n: 1, cls, memo: note });
   }
   if (!rows.length) return '<small>空きトレイを押して種を播こう。契約の納品日（☰ の契約）から逆算して播くのがコツ。</small>';
-  return rows.slice(-40).reverse().map(r => `<div class="jn${r.cls ? ' ' + r.cls : ''}"><small>${when(r.hour)}</small> ${r.text}${r.n > 1 ? ` ×${r.n}` : ''}</div>`).join('');
+  return rows.slice(-40).reverse().map(r => `<div class="jn${r.cls ? ' ' + r.cls : ''}"><small>${when(r.hour)}</small> <span class="jt">${r.text}${r.n > 1 ? ` ×${r.n}` : ''}</span>${r.memo ?? ''}</div>`).join('');
 }
 
 /** 月次損益（締めた月と今月の途中） */
@@ -321,9 +379,9 @@ function plHtml(f: FarmState): string {
 /** 作物ごとの1トレイの損益見込み */
 function estHtml(f: FarmState): string {
   return Object.keys(B.crops).map(id => {
-    const e = trayEstimate(id, B, f.equipment), c = e.cost;
+    const e = trayEstimate(id, B, f.equipment, contractsOf(f).filter(c => !f.contracts[c.id].lost)), c = e.cost;
     const rows = e.outlets.map(o => {
-      const ct = o.contract ? B.contracts.find(x => x.id === o.contract)! : null;
+      const ct = o.contract ? contractById(o.contract) : null;
       const rest = e.yieldG > o.grams ? '＋残りを卸' : '';
       const label = ct ? `${ct.name}（契約 ${o.grams}g${rest}）` : o.kind === 'wholesale' ? '卸（全量）' : `直売（${o.grams.toFixed(0)}g${rest}）`;
       return `<tr><td>${label}</td><td>${yen(o.net)}</td><td class="${o.profit < 0 ? 'ng' : 'ok'}">${signed(o.profit)}</td></tr>`;

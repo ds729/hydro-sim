@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
-  BUSINESS, CROPS, applyFarmCommand, canBuy, createFarm, createSim, farmTick, rackValues, reserved, tick, totals, trayEstimate,
-  type Factor, type FarmState, type Ledger,
+  BUSINESS, CROPS, applyFarmCommand, canBuy, createFarm, createSim, farmTick, contractsOf, rackValues, reserved, tick, totals, trayEstimate,
+  type Factor, type FarmEvent, type FarmState, type Ledger, type ShortCause,
 } from './index';
 
 const R = 'rack1';
@@ -226,6 +226,88 @@ describe('経営モード（Phase 4）', () => {
     applyFarmCommand(f, { type: 'buy', item: 'probe' });
     farmTick(f);
     expect(f.readAt).toBe(f.hour);
+  });
+
+  /** ビストロ（ラディッシュ 300g・木曜＝Day 4, 11, …。Day 10 から）の最初の納品の欠品の原因 */
+  function bistroShort(setup: (f: FarmState) => void, each: (f: FarmState) => void = keepInBand): ShortCause | undefined {
+    const f = createFarm();
+    setup(f);
+    run(f, 24 * 10 + 1, each);
+    const d = f.log.find((e): e is Extract<FarmEvent, { kind: 'delivery' }> => e.kind === 'delivery' && e.contract === 'bistro');
+    expect(d).toBeDefined();
+    return d!.cause;
+  }
+
+  test('欠品の原因：播いていない・収穫していない・播くのが遅い・育ちが遅れた', () => {
+    expect(bistroShort(() => {})).toBe('notSown');
+    expect(bistroShort(f => applyFarmCommand(f, { type: 'sow', rack: R, slot: 0, crop: 'radish' }))).toBe('notHarvested');
+    // Day 7 に播くと、順調でも Day 15 まで育ち終わらない
+    expect(bistroShort(() => {}, f => {
+      keepInBand(f);
+      if (f.hour === 24 * 6) applyFarmCommand(f, { type: 'sow', rack: R, slot: 0, crop: 'radish' });
+    })).toBe('sownLate');
+    // Day 1 に播いたが、EC を適正帯の下（適合度 0.5）に置いて育ちを半分にする
+    expect(bistroShort(f => applyFarmCommand(f, { type: 'sow', rack: R, slot: 0, crop: 'radish' }), f => {
+      keepInBand(f);
+      const c = f.compartments[0];
+      c.solutes.salts = 0.65 * c.water;
+    })).toBe('slow');
+    // 納品の前日に在庫があれば欠品にならない（原因なし。前日までは直売が毎日在庫を売る）
+    expect(bistroShort(() => {}, f => {
+      if (f.hour === 24 * 9 + 12) f.stock.push({ crop: 'radish', grams: 300, grade: 'A', mult: 1, harvestedAt: f.hour, expiresAt: f.hour + 72 });
+    })).toBeUndefined();
+  });
+
+  test('観察メモ：棚の苗に症状が続くと出る。枯れたら原因の症状を記録する', () => {
+    const f = createFarm();
+    applyFarmCommand(f, { type: 'sow', rack: R, slot: 0, crop: 'radish' });
+    // EC を上限の近く（適合度 0.2）に保つ
+    run(f, 24 * 3, f => { const c = f.compartments[0]; c.solutes.salts = 2.64 * c.water; });
+    const adv = f.log.filter(e => e.kind === 'advice');
+    expect(adv.length).toBeGreaterThanOrEqual(2);
+    expect(adv[0]).toMatchObject({ rack: R, crop: 'radish', factor: 'ec', side: 'high' });
+    // 同じ症状は 24 時間あける
+    expect(adv[1].hour - adv[0].hour).toBeGreaterThanOrEqual(24);
+    run(f, 24 * 10, f => { const c = f.compartments[0]; c.solutes.salts = 2.9 * c.water; });
+    expect(f.log.find(e => e.kind === 'dead')).toMatchObject({ reason: 'health', factor: 'ec', side: 'high' });
+  });
+
+  test('評判：納品で上がり、欠品で下がる。評判が上がると新しい取引先から申し出が来る', () => {
+    const f = createFarm();
+    run(f, 24 * 10 + 1, f => {
+      if (f.hour === 24 * 9 + 12) f.stock.push({ crop: 'radish', grams: 300, grade: 'A', mult: 1, harvestedAt: f.hour, expiresAt: f.hour + 72 });
+    });
+    expect(f.reputation).toBe(BUSINESS.reputation.delivery);
+    // 申し出の評判に届くと、次の締め（0時）で1つ来る
+    const deli = BUSINESS.offers.find(o => o.id === 'deli')!;
+    f.reputation = deli.needRep!;
+    run(f, 24);
+    expect(f.offers).toEqual({ deli: 'pending' });
+    expect(f.log.some(e => e.kind === 'offer' && e.offer === 'deli')).toBe(true);
+    // 受けると、7日後から契約の納品が始まる（取り置き・欠品の判定も同じ）
+    const day = Math.floor(f.hour / 24) + 1;
+    expect(applyFarmCommand(f, { type: 'accept', offer: 'deli' })).toBe(true);
+    expect(applyFarmCommand(f, { type: 'accept', offer: 'deli' })).toBe(false);
+    const c = contractsOf(f).find(c => c.id === 'deli')!;
+    expect(c.startDay).toBe(day + BUSINESS.offerLeadDays);
+    run(f, 24 * 14);
+    const first = f.log.find(e => e.kind === 'delivery' && e.contract === 'deli');
+    expect(first).toMatchObject({ cause: 'notSown' });
+    expect(Math.floor(first!.hour / 24) + 1).toBeGreaterThanOrEqual(c.startDay);
+    expect(f.contracts.deli.misses).toBeGreaterThan(0);
+  });
+
+  test('申し出は断るともう来ない。評判が足りなければ次の申し出は来ない', () => {
+    const f = createFarm();
+    f.reputation = BUSINESS.offers[0].needRep!;
+    run(f, 24);
+    expect(applyFarmCommand(f, { type: 'decline', offer: 'deli' })).toBe(true);
+    run(f, 24 * 3);
+    expect(f.offers).toEqual({ deli: 'declined' });
+    expect(contractsOf(f).some(c => c.id === 'deli')).toBe(false);
+    f.reputation = 100;
+    run(f, 24 * 2);
+    expect(Object.keys(f.offers)).toEqual(['deli', 'sushi', 'buffet']);
   });
 
   test('1か月回せる：納品日から逆算して播けば、契約を守って黒字の月次損益が出る', () => {
