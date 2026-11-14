@@ -2,8 +2,9 @@
 
 import { execute, SUPPLIES, type Command, type DoseSupply } from './commands';
 import { applyFlows, ecOf, fill, findCompartment, type Compartment, type Flow, type Solution } from './compartment';
-import { CROPS, FACTORS, MEASURE, diurnal, exchange, fitness, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
+import { CROPS, FACTORS, MEASURE, diurnal, exchange, isLit, fitness, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
 import { limiting, side } from './fitness';
+import { aerate, createFacility, endHour, fixPump, o2Fitness, powered, pumpRunning, rollEvents, watchHypoxia, type FacilityEvent, type FacilityState } from './facility';
 
 /** 設備の構成。水耕は栽培槽1区画で流れなし */
 export interface Setup {
@@ -31,7 +32,9 @@ export type SimEvent =
   | {
     hour: number; kind: 'advice'; factor: Factor; side: 'low' | 'high'; value: number;
     fit: number; driver: DoseSupply | null; driverHour: number | null;
-  };
+  }
+  /** 設備：停電・電気の復旧・ポンプの停止・根の酸欠の観察メモ（facility.ts） */
+  | ({ hour: number } & FacilityEvent);
 
 export interface Result {
   outcome: 'harvest' | 'dead' | 'late';
@@ -54,6 +57,8 @@ export interface SimState {
   rng: number;
   compartments: Compartment[];
   flows: Flow[];
+  /** 電気・ポンプ（停電・ポンプの停止。区画ごとにポンプが1台） */
+  facility: FacilityState;
   crop: CropState;
   /** 資材費の累計 円 */
   cost: number;
@@ -72,10 +77,11 @@ const WATCH_LOW = 0.7, WATCH_HOURS = 3, WATCH_INTERVAL = 24;
 /** この適合度以上なら「適正」とみなす（観察メモの原因は、最後に適正だった時刻より後の操作から探す） */
 const WATCH_OK = 0.9;
 
-export function createSim(opts: { crop?: string; seed?: number; setup?: Setup } = {}): SimState {
+/** events：停電・ポンプの停止を起こす（既定は起こさない） */
+export function createSim(opts: { crop?: string; seed?: number; setup?: Setup; events?: boolean } = {}): SimState {
   const setup = opts.setup ?? HYDROPONIC;
   const compartments = setup.compartments.map(d => {
-    const c: Compartment = { id: d.id, capacity: d.capacity, water: 0, solutes: { salts: 0 }, ph: 7 };
+    const c: Compartment = { id: d.id, capacity: d.capacity, water: 0, solutes: { salts: 0 }, ph: 7, o2: 1 };
     fill(c, d.initial);
     return c;
   });
@@ -83,6 +89,7 @@ export function createSim(opts: { crop?: string; seed?: number; setup?: Setup } 
   if (!CROPS[id]) throw new Error(`作物 ${id} がありません`);
   return {
     setup, hour: 0, rng: (opts.seed ?? 1) >>> 0, compartments, flows: setup.flows.map(f => ({ ...f })),
+    facility: createFacility(opts.events ?? false),
     crop: { id, compartment: setup.bed, growth: 0, health: 100, qualitySum: 0 },
     cost: 0, history: [], log: [{ hour: 0, kind: 'start', crop: id }],
     watch: { ec: { low: 0, last: null, okAt: 0 }, ph: { low: 0, last: null, okAt: 0 }, water: { low: 0, last: null, okAt: 0 } },
@@ -99,14 +106,19 @@ export const dayOf = (s: SimState) => Math.floor(s.hour / 24) + 1;
 /** 1時間進める。終わっていたら何もしない */
 export function tick(s: SimState): void {
   if (s.result) return;
-  const spec = cropSpec(s), bed = bedOf(s);
+  const spec = cropSpec(s), bed = bedOf(s), fx = s.facility;
+  for (const e of rollEvents(fx, s, s.compartments.map(c => c.id))) s.log.push({ hour: s.hour, ...e });
+  const power = powered(fx);
+  for (const c of s.compartments) aerate(c, pumpRunning(fx, c.id));
   applyFlows(s.compartments, s.flows);
-  exchange(s.crop, spec, bed, diurnal(s.hour));
-  const f = fitness(spec, bed), lim = limiting(FACTORS, f);
-  grow(s.crop, spec, lim.value);
-  if (lim.value < 1) {
-    const k = `${lim.key}.${side(MEASURE[lim.key](bed), spec.bands[lim.key])}`;
-    s.loss[k] = (s.loss[k] ?? 0) + 1 - lim.value;
+  exchange(s.crop, spec, bed, diurnal(s.hour, power));
+  // 律速：EC・pH・液量のうち最も悪いものと、溶存酸素
+  const f = fitness(spec, bed), lim = limiting(FACTORS, f), o2 = o2Fitness(bed), m = Math.min(lim.value, o2);
+  // 停電で照明が消えた明期は育たない（夜の停電は照明には響かない）
+  grow(s.crop, spec, m, !power && isLit(s.hour) ? 0 : 1);
+  if (m < 1) {
+    const k = o2 < lim.value ? 'o2.low' : `${lim.key}.${side(MEASURE[lim.key](bed), spec.bands[lim.key])}`;
+    s.loss[k] = (s.loss[k] ?? 0) + 1 - m;
   }
   s.hour++;
   if (s.hour % 24 === 0) {
@@ -122,6 +134,9 @@ export function tick(s: SimState): void {
       s.log.push({ hour: s.hour, kind: 'advice', factor: k, side: sd, value: v, fit: f[k], driver: d?.supply ?? null, driverHour: d?.hour ?? null });
     }
   }
+  const hx = watchHypoxia(fx, bed, s.hour, pumpRunning(fx, bed.id));
+  if (hx) s.log.push({ hour: s.hour, ...hx });
+  for (const e of endHour(fx)) s.log.push({ hour: s.hour, ...e });
   if (s.hour % 2 === 0) s.history.push({ ec: ecOf(bed), ph: bed.ph, water: bed.water });
   if (s.crop.health <= 0) finish(s, 'dead');
   else if (s.crop.growth >= 1) finish(s, 'harvest');
@@ -133,7 +148,9 @@ export function applyCommand(s: SimState, cmd: Command): boolean {
   if (s.result) return false;
   const d = s.setup.compartments.find(c => c.id === cmd.target);
   if (!d) throw new Error(`区画 ${cmd.target} がありません`);
-  s.cost += execute(s.compartments, cmd, d.initial);
+  if (cmd.type === 'fixPump') {
+    if (!fixPump(s.facility, cmd.target)) return false;
+  } else s.cost += execute(s.compartments, cmd, d.initial);
   s.log.push({ hour: s.hour, kind: 'command', command: cmd });
   return true;
 }

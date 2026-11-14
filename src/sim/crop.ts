@@ -2,9 +2,9 @@
 // 生き物（作物・v2 の魚・硝化菌）は「exchange で区画の物質をやり取りし、適合度で育つ・弱る」形に揃える
 
 import cropsJson from '../data/crops.json';
-import facilityJson from '../data/facility.json';
 import { ecOf, type Compartment } from './compartment';
 import { trapezoid, type Band } from './fitness';
+import { FACILITY, respire } from './facility';
 
 export const FACTORS = ['ec', 'ph', 'water'] as const;
 
@@ -75,7 +75,7 @@ export function fitness(spec: CropSpec, c: Compartment): Record<Factor, number> 
  * 照明（LED）の点灯・消灯の時刻（時。hour % 24 で比べる）と、暗期の根の活動（吸水・吸収・pH の変化）の明期に対する割合。
  * 1日の合計は変えない（作物の吸水量 waterLph は1日の平均）。成長は暗期も同じ速さ（日数は昼夜を含めた日数のため）
  */
-export const LIGHT = (facilityJson as { light: { on: number; off: number; darkUptakeRatio: number } }).light;
+export const LIGHT = FACILITY.light;
 const LIT_HOURS = LIGHT.off - LIGHT.on;
 const LIT_MULT = 24 / (LIT_HOURS + (24 - LIT_HOURS) * LIGHT.darkUptakeRatio);
 
@@ -85,14 +85,15 @@ export function isLit(hour: number): boolean {
   return h >= LIGHT.on && h < LIGHT.off;
 }
 
-/** その時刻の根の活動の倍率（明期は 1 より大きく、暗期は小さい。1日の平均が 1） */
-export function diurnal(hour: number): number {
-  return isLit(hour) ? LIT_MULT : LIT_MULT * LIGHT.darkUptakeRatio;
+/** その時刻の根の活動の倍率（明期は 1 より大きく、暗期は小さい。1日の平均が 1）。停電中（power が false）は照明が消えるので暗期と同じ */
+export function diurnal(hour: number, power = true): number {
+  return power && isLit(hour) ? LIT_MULT : LIT_MULT * LIGHT.darkUptakeRatio;
 }
 
-/** 1時間分、区画から水と塩類を吸い、pH を動かす。light は昼夜の倍率（diurnal） */
+/** 1時間分、区画から水と塩類を吸い、pH を動かし、酸素を使う。light は昼夜の倍率（diurnal。呼吸には掛けない） */
 export function exchange(crop: CropState, spec: CropSpec, c: Compartment, light = 1): void {
-  const u = spec.uptake, act = (u.activity[0] + u.activity[1] * crop.growth) * light;
+  const u = spec.uptake, base = u.activity[0] + u.activity[1] * crop.growth, act = base * light;
+  respire(c, base);
   const et = u.waterLph * act, ec = ecOf(c);
   c.water = Math.max(0.05, c.water - et);
   c.solutes.salts = Math.max(0, c.solutes.salts - et * ec * u.saltRatio);
@@ -116,9 +117,12 @@ export function harvestOf(crop: CropState, spec: CropSpec, hours: number): { qua
   return { quality, ...gradeOf(quality), yieldG: spec.yieldG * Math.sqrt(Math.max(0, crop.health) / 100) * quality };
 }
 
-/** 1時間分育つ。m は律速因子の適合度。0.5 未満で健康度が減り、0.9 超で回復する */
-export function grow(crop: CropState, spec: CropSpec, m: number): void {
-  crop.growth = Math.min(1, crop.growth + m / (spec.days * 24));
+/**
+ * 1時間分育つ。m は律速因子の適合度（溶存酸素を含む）。0.5 未満で健康度が減り、0.9 超で回復する。
+ * rate は成長の倍率（停電で照明が消えた明期は 0。健康度・品質はふだんどおり）
+ */
+export function grow(crop: CropState, spec: CropSpec, m: number, rate = 1): void {
+  crop.growth = Math.min(1, crop.growth + (m * rate) / (spec.days * 24));
   crop.health = m < 0.5 ? crop.health - (0.5 - m) * 3 : m > 0.9 ? Math.min(100, crop.health + 0.3) : crop.health;
   crop.qualitySum += m;
 }

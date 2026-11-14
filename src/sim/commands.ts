@@ -19,13 +19,16 @@ export type Command =
   /** 資材を区画に入れる（amount は資材の単位で） */
   | { type: 'dose'; target: string; supply: DoseSupply; amount: number }
   /** 養液を初期組成に入れ替える */
-  | { type: 'replaceSolution'; target: string };
+  | { type: 'replaceSolution'; target: string }
+  /** 止まったポンプを直す（掃除して動かし直す）。区画は変えず、sim が設備の状態（facility.ts）で扱う */
+  | { type: 'fixPump'; target: string };
 
 const PH_MIN = 3, PH_MAX = 9;
 
 /** 区画を変え、かかった費用を返す */
 export function execute(cs: readonly Compartment[], cmd: Command, initial: Solution): number {
   const c = findCompartment(cs, cmd.target);
+  if (cmd.type === 'fixPump') return 0;
   if (cmd.type === 'replaceSolution') {
     fill(c, initial);
     return SUPPLIES.solution.pricePerUnit;

@@ -4,8 +4,9 @@
 import businessJson from '../data/business.json';
 import { execute, type Command } from './commands';
 import { fill, findCompartment, type Compartment, type Solution } from './compartment';
-import { CROPS, FACTORS, MEASURE, diurnal, exchange, fitness, gradeOf, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
+import { CROPS, FACTORS, MEASURE, diurnal, exchange, isLit, fitness, gradeOf, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
 import { limiting, side } from './fitness';
+import { aerate, createFacility, endHour, fixPump, o2Fitness, powered, pumpRunning, rollEvents, watchHypoxia, type FacilityEvent, type FacilityState } from './facility';
 
 // ---- データ（business.json） ----
 
@@ -61,7 +62,7 @@ export interface Equipment {
   note: string;
 }
 
-export type EquipmentId = 'rack' | 'autoWater' | 'autoPh' | 'probe' | 'fridge' | 'led';
+export type EquipmentId = 'rack' | 'autoWater' | 'autoPh' | 'probe' | 'fridge' | 'led' | 'ups' | 'sparePump';
 
 export interface Business {
   startCash: number;
@@ -88,7 +89,7 @@ export interface Business {
   /** ペン型の計器で毎朝測る時刻（時）。連続測定センサがあれば毎時読める */
   measureHour: number;
   /** 作業時間 分（1トレイの播種、1トレイの収穫・包装、1回の測定）。損益には入れず、時給の目安に使う */
-  laborMin: { sow: number; harvest: number; measure: number };
+  laborMin: { sow: number; harvest: number; measure: number; fixPump: number };
   /** 直売の1日の需要 g（作物によらず合計。古い在庫から売れる） */
   directDemandGPerDay: number;
   channels: Record<'wholesale' | 'restaurant' | 'direct', Channel>;
@@ -175,8 +176,8 @@ export type ShortCause = 'notHarvested' | 'died' | 'expired' | 'slow' | 'sownLat
 export type FarmEvent =
   | { hour: number; kind: 'command'; command: FarmCommand; auto?: boolean }
   | { hour: number; kind: 'harvest'; rack: string; slot: number; crop: string; grams: number; grade: Grade }
-  /** 枯れた。health のときは律速因子とその向き（枯れた原因の症状） */
-  | { hour: number; kind: 'dead'; rack: string; slot: number; crop: string; reason: 'health' | 'overgrown'; factor?: Factor; side?: 'low' | 'high' }
+  /** 枯れた。health のときは律速因子とその向き（枯れた原因の症状）、hypoxia は根の酸欠（溶存酸素が律速） */
+  | { hour: number; kind: 'dead'; rack: string; slot: number; crop: string; reason: 'health' | 'overgrown' | 'hypoxia'; factor?: Factor; side?: 'low' | 'high' }
   /** 納品。欠品（1割を超える不足）なら cause に原因 */
   | { hour: number; kind: 'delivery'; contract: string; grams: number; short: number; yen: number; cause?: ShortCause }
   /** 観察メモ：棚の苗に症状が続いた（律速因子の適合度 0.7 未満が3時間）。crop は一番弱っているトレイの作物 */
@@ -186,13 +187,17 @@ export type FarmEvent =
   | { hour: number; kind: 'contractLost'; contract: string }
   | { hour: number; kind: 'direct'; grams: number; yen: number }
   | { hour: number; kind: 'expired'; crop: string; grams: number }
-  | { hour: number; kind: 'month'; ledger: Ledger };
+  | { hour: number; kind: 'month'; ledger: Ledger }
+  /** 設備：停電・電気の復旧・ポンプの停止（target は棚）・根の酸欠の観察メモ（facility.ts） */
+  | ({ hour: number } & FacilityEvent);
 
 export interface FarmState {
   hour: number;
   rng: number;
   cash: number;
   compartments: Compartment[];
+  /** 電気・ポンプ（棚ごとにポンプが1台） */
+  facility: FacilityState;
   racks: Rack[];
   stock: Lot[];
   equipment: Record<EquipmentId, number>;
@@ -239,7 +244,7 @@ function rackSolution(b: Business): Solution {
 
 function addRack(f: FarmState, b: Business): void {
   const id = `${RACK_PREFIX}${f.racks.length + 1}`, sol = rackSolution(b);
-  const c: Compartment = { id, capacity: 3 * b.slotsPerRack, water: 0, solutes: { salts: 0 }, ph: 7 };
+  const c: Compartment = { id, capacity: 3 * b.slotsPerRack, water: 0, solutes: { salts: 0 }, ph: 7, o2: 1 };
   fill(c, sol);
   f.compartments.push(c);
   f.racks.push({ id, slots: Array(b.slotsPerRack).fill(null) });
@@ -247,11 +252,12 @@ function addRack(f: FarmState, b: Business): void {
   f.watch[id] = { low: 0, key: '', last: {} };
 }
 
-export function createFarm(opts: { seed?: number; business?: Business } = {}): FarmState {
+/** events：停電・ポンプの停止を起こす（画面の経営モードは起こす。sim の既定は起こさない＝テストの数値を変えない） */
+export function createFarm(opts: { seed?: number; business?: Business; events?: boolean } = {}): FarmState {
   const b = opts.business ?? BUSINESS;
   const f: FarmState = {
-    hour: 0, rng: (opts.seed ?? 1) >>> 0, cash: b.startCash, compartments: [], racks: [], stock: [],
-    equipment: { rack: 0, autoWater: 0, autoPh: 0, probe: 0, fridge: 0, led: 0 }, assets: [],
+    hour: 0, rng: (opts.seed ?? 1) >>> 0, cash: b.startCash, compartments: [], facility: createFacility(opts.events ?? false), racks: [], stock: [],
+    equipment: { rack: 0, autoWater: 0, autoPh: 0, probe: 0, fridge: 0, led: 0, ups: 0, sparePump: 0 }, assets: [],
     contracts: Object.fromEntries(b.contracts.map(c => [c.id, { misses: 0, lost: false }])), reputation: 0, offers: {}, watch: {},
     ledger: newLedger(1), months: [], readings: {}, readAt: 0, log: [],
   };
@@ -272,7 +278,7 @@ export const farmDay = (f: FarmState) => Math.floor(f.hour / 24) + 1;
  * 作物の帯（液量 L）は栽培モードのトレイ1枚分なので、この見かけの区画で適合度と吸収を計算する
  */
 function share(c: Compartment, n: number): Compartment {
-  return { id: c.id, capacity: c.capacity / n, water: c.water / n, solutes: { salts: c.solutes.salts / n }, ph: c.ph };
+  return { id: c.id, capacity: c.capacity / n, water: c.water / n, solutes: { salts: c.solutes.salts / n }, ph: c.ph, o2: c.o2 };
 }
 
 /** 棚の1トレイ分の見かけの値（EC・pH・液量） */
@@ -320,48 +326,57 @@ const unitPrice = (b: Business, crop: string, ch: keyof Business['channels'], co
 
 /** 1時間進める */
 export function farmTick(f: FarmState, b: Business = BUSINESS): void {
-  const light = diurnal(f.hour);
+  const fx = f.facility;
+  for (const e of rollEvents(fx, f, f.racks.map(r => r.id))) f.log.push({ hour: f.hour, ...e });
+  const power = powered(fx), light = diurnal(f.hour, power), rate = !power && isLit(f.hour) ? 0 : 1;
   for (const r of f.racks) {
-    const bed = findCompartment(f.compartments, r.id), n = b.slotsPerRack;
-    let dWater = 0, dSalts = 0, dPh = 0;
+    const bed = findCompartment(f.compartments, r.id), n = b.slotsPerRack, running = pumpRunning(fx, r.id, f.equipment.ups > 0);
+    aerate(bed, running);
+    let dWater = 0, dSalts = 0, dPh = 0, dO2 = 0, live = false;
     /** 棚で一番弱っている苗（観察メモ用） */
     let weak: { value: number; key: string; crop: string } | null = null;
     for (let i = 0; i < r.slots.length; i++) {
       const t = r.slots[i];
       if (!t || t.crop.health <= 0) continue;
-      const spec = CROPS[t.crop.id], c = share(bed, n), before = { w: c.water, s: c.solutes.salts, ph: c.ph };
-      const lim = limiting(FACTORS, fitness(spec, c));
+      live = true;
+      const spec = CROPS[t.crop.id], c = share(bed, n), before = { w: c.water, s: c.solutes.salts, ph: c.ph, o2: c.o2 };
+      const lim = limiting(FACTORS, fitness(spec, c)), o2 = o2Fitness(c), m = Math.min(lim.value, o2);
       const sd = side(MEASURE[lim.key](c), spec.bands[lim.key]);
       if (!weak || lim.value < weak.value) weak = { value: lim.value, key: `${lim.key}.${sd}`, crop: t.crop.id };
       exchange(t.crop, spec, c, light);
       dWater += c.water - before.w;
       dSalts += c.solutes.salts - before.s;
       dPh += (c.ph - before.ph) / n;
+      dO2 += (c.o2 - before.o2) / n;
       if (t.ripeAt === null) {
-        grow(t.crop, spec, lim.value);
+        grow(t.crop, spec, m, rate);
         if (t.crop.growth >= 1) t.ripeAt = f.hour + 1;
       } else {
         // 育ち終えた後も健康度は変わる（品質の累計は止める）
         const q = t.crop.qualitySum;
-        grow(t.crop, spec, lim.value);
+        grow(t.crop, spec, m, rate);
         t.crop.qualitySum = q;
       }
-      if (t.crop.health <= 0) kill(f, r, i, 'health', lim.key, sd);
+      if (t.crop.health <= 0) { if (o2 < lim.value) kill(f, r, i, 'hypoxia'); else kill(f, r, i, 'health', lim.key, sd); }
       else if (t.ripeAt !== null && (f.hour + 1 - t.ripeAt) / 24 > b.crops[t.crop.id].windowDays + b.overgrowDiscardDays) kill(f, r, i, 'overgrown');
     }
     bed.water = Math.max(0.05 * n, bed.water + dWater);
     bed.solutes.salts = Math.max(0, bed.solutes.salts + dSalts);
     bed.ph += dPh;
+    bed.o2 = Math.min(1, Math.max(0, bed.o2 + dO2));
     watch(f, r.id, weak);
+    const hx = live ? watchHypoxia(fx, bed, f.hour + 1, running) : null;
+    if (hx) f.log.push({ hour: f.hour + 1, ...hx });
   }
   f.hour++;
   automate(f, b);
+  for (const e of endHour(fx)) f.log.push({ hour: f.hour, ...e });
   if (f.equipment.probe || f.hour % 24 === b.measureHour) read(f, b);
   if (f.hour % 24 === 0) daily(f, b);
 }
 
 /** 枯れたトレイは片付けるまで場所をふさぐ（作物の状態は残し、health ≤ 0 で枯死を表す） */
-function kill(f: FarmState, r: Rack, slot: number, reason: 'health' | 'overgrown', factor?: Factor, sd?: 'low' | 'high') {
+function kill(f: FarmState, r: Rack, slot: number, reason: 'health' | 'overgrown' | 'hypoxia', factor?: Factor, sd?: 'low' | 'high') {
   const t = r.slots[slot]!;
   t.crop.health = 0;
   f.log.push({ hour: f.hour + 1, kind: 'dead', rack: r.id, slot, crop: t.crop.id, reason, ...(factor && { factor, side: sd }) });
@@ -381,8 +396,10 @@ function watch(f: FarmState, rack: string, weak: { value: number; key: string; c
   }
 }
 
-/** 設備による自動の操作（自動給水・pH 自動調整）。操作はコマンドとして実行し、記録に auto を付ける */
+/** 設備による自動の操作（自動給水・pH 自動調整・予備ポンプへの切り替え）。操作はコマンドとして実行し、記録に auto を付ける */
 function automate(f: FarmState, b: Business): void {
+  // 予備ポンプ：止まったポンプは予備に切り替え、止まった方は掃除して予備に回す（作業時間はかかる）
+  if (f.equipment.sparePump) for (const id of [...f.facility.pumpDown]) run(f, b, { type: 'fixPump', target: id }, true);
   for (const r of f.racks) {
     if (!r.slots.some(t => t && t.crop.health > 0)) continue;
     const v = rackValues(f, r.id, b), crops = r.slots.filter((t): t is Tray => !!t).map(t => CROPS[t.crop.id]);
@@ -567,6 +584,12 @@ function perform(f: FarmState, b: Business, cmd: FarmCommand): boolean {
       bed.solutes.salts = v.solutes.salts * n;
       bed.ph = v.ph;
       spend(f, 'nutrient', yen);
+      return true;
+    }
+    case 'fixPump': {
+      rackOf(f, cmd.target);
+      if (!fixPump(f.facility, cmd.target)) return false;
+      f.ledger.laborMin += b.laborMin.fixPump;
       return true;
     }
     case 'sow': {

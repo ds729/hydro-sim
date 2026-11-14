@@ -7,3 +7,4 @@ export * from './fitness';
 export * from './rng';
 export * from './quiz';
 export * from './farm';
+export * from './facility';

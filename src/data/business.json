@@ -13,7 +13,7 @@
   "overgrowDiscardDays": 4,
   "measureHour": 8,
   "directDemandGPerDay": 50,
-  "laborMin": { "sow": 5, "harvest": 10, "measure": 2 },
+  "laborMin": { "sow": 5, "harvest": 10, "measure": 2, "fixPump": 15 },
   "channels": {
     "wholesale": { "name": "卸", "priceMult": 0.4, "packYenPer100g": 5 },
     "restaurant": { "name": "飲食店", "priceMult": 0.6, "packYenPer100g": 10 },
@@ -38,7 +38,9 @@
     "autoPh": { "name": "pH 自動調整", "price": 90000, "lifeMonths": 36, "note": "pH が適正帯の端に寄ったら調整剤を入れる。調整剤の費用はかかる" },
     "probe": { "name": "連続測定センサ", "price": 70000, "lifeMonths": 36, "note": "EC・pH・液量を毎時読める（ペン型は朝の1回と測ったときだけ）" },
     "fridge": { "name": "業務用冷蔵庫", "price": 100000, "lifeMonths": 60, "note": "4℃前後で保てるので日持ちが 3日から 7日に延びる" },
-    "led": { "name": "省エネ LED", "price": 40000, "lifeMonths": 60, "note": "照明の電気代が 4 割減る" }
+    "led": { "name": "省エネ LED", "price": 40000, "lifeMonths": 60, "note": "照明の電気代が 4 割減る" },
+    "ups": { "name": "非常用電源", "price": 60000, "lifeMonths": 60, "note": "停電してもポンプを動かし続ける（照明は止まる）。根の酸欠を防ぐ" },
+    "sparePump": { "name": "予備ポンプ", "price": 20000, "lifeMonths": 36, "note": "ポンプが止まったらすぐ予備に切り替える。止まった方の掃除の作業時間はかかる" }
   },
   "crops": {
     "radish": { "seedG": 30, "seedYenPerG": 3.4, "trayYieldG": 300, "retailPer100g": 2000, "shelfDays": 3, "windowDays": 2 },

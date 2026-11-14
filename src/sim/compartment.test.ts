@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { applyFlows, ecOf, type Compartment, type Flow } from './compartment';
 
 const comp = (id: string, water: number, ec: number, ph: number, capacity = 10): Compartment =>
-  ({ id, capacity, water, solutes: { salts: ec * water }, ph });
+  ({ id, capacity, water, solutes: { salts: ec * water }, ph, o2: 1 });
 
 test('循環させると水と塩類の総量は保たれ、濃度がそろう', () => {
   const cs = [comp('fish', 6, 0.4, 7.2), comp('filter', 2, 1.0, 7.0), comp('bed', 3, 2.0, 6.5)];

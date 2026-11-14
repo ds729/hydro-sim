@@ -24,7 +24,7 @@ function setHtml(el: HTMLElement, html: string) {
 
 /** [要因, 表示名, ゲージの下端, 上端, 小数桁]。HUD（栽培モード）と同じ目盛り */
 const GAUGES: [Factor, string, number, number, number][] = [['ec', 'EC', 0, 3, 2], ['ph', 'pH', 4, 8, 2], ['water', '液量 L', 0, 3, 2]];
-const EQUIP_ORDER: EquipmentId[] = ['rack', 'autoWater', 'probe', 'autoPh', 'fridge', 'led'];
+const EQUIP_ORDER: EquipmentId[] = ['rack', 'autoWater', 'probe', 'autoPh', 'fridge', 'led', 'sparePump', 'ups'];
 type BookTab = 'equip' | 'pl' | 'est';
 
 /** 棚に植わっている（枯れていない）作物の適正帯の重なり。重ならなければ緑の幅 0 */
@@ -296,6 +296,7 @@ function logHtml(f: FarmState): string {
         const c = e.command;
         if (c.type === 'sow') text = `🌱 ${cropName(c.crop)}を播いた`;
         else if (c.type === 'clear') text = '🧹 枯れたトレイを片付けた';
+        else if (c.type === 'fixPump') text = e.auto ? `🔧 ${spot(c.target)}：予備ポンプに切り替えた（止まった方を掃除）` : `🔧 ${spot(c.target)}のポンプを直した`;
         else if (c.type === 'wholesale') text = `📦 ${c.crop ? cropName(c.crop) : '在庫'}を卸に出した`;
         else if (c.type === 'buy') { text = `🛒 ${B.equipment[c.item].name}を買った（${yen(B.equipment[c.item].price)}）`; cls = 'o'; }
         else if (c.type === 'accept') { const o = contractById(c.offer); text = `🤝 ${o.name}と契約した（Day ${f.contracts[o.id].startDay} から毎週${WD[o.weekday]}）`; cls = 'o'; }
@@ -328,9 +329,12 @@ function logHtml(f: FarmState): string {
           `播く量を売れる量（契約＋直売）に合わせる。余りそうなら早めに卸に出す${f.equipment.fridge ? '' : '。業務用冷蔵庫で日持ちが延びる'}。`);
         break;
       case 'dead': {
-        text = `🥀 ${spot(e.rack, e.slot)} ${cropName(e.crop)}が${e.reason === 'health' ? '枯れた' : '育ちすぎて売れなくなった'}`;
+        text = `🥀 ${spot(e.rack, e.slot)} ${cropName(e.crop)}が${e.reason === 'overgrown' ? '育ちすぎて売れなくなった' : '枯れた'}`;
         cls = 'ng';
-        if (e.reason === 'overgrown') {
+        if (e.reason === 'hypoxia') {
+          const sy = SYMPTOMS['o2.low'];
+          note = memo(`${sy.icon} ${sy.name}が続いた。${sy.natural}`, `${sy.fix}${f.equipment.sparePump ? '' : '予備ポンプがあれば止まってもすぐ切り替わる。'}`);
+        } else if (e.reason === 'overgrown') {
           note = memo(`育ち終えてから収穫しないまま、適期（${B.crops[e.crop].windowDays}日）を ${B.overgrowDiscardDays}日過ぎた。`, '育ち終えたら適期の間に収穫する。収穫しきれないなら播く枚数を減らす。');
         } else if (e.factor) {
           const sy = SYMPTOMS[`${e.factor}.${e.side}`];
@@ -343,6 +347,24 @@ function logHtml(f: FarmState): string {
         text = `🔍 ${spot(e.rack)}：${cropName(e.crop)}に${sy.name}のサイン`;
         cls = 'o';
         note = memo(`${sy.label}（${sy.name}）かもしれない。${sy.natural}`, `🔍 測るで値を確かめてから、${sy.fix}`, sy.look);
+        break;
+      }
+      case 'outage':
+        text = `⚡ 停電（${e.hours}時間ほど）`;
+        cls = 'ng';
+        note = memo('電力会社の停電。照明とポンプが止まる。', f.equipment.ups ? '非常用電源でポンプは動いている。照明が点く時間帯は育たない。' : '待つしかない。長い停電は根が酸欠になる。非常用電源があればポンプは止まらない。');
+        break;
+      case 'powerBack': text = '💡 電気が戻った'; break;
+      case 'pumpStop':
+        text = `🛑 ${spot(e.target)}のポンプが止まった`;
+        cls = 'ng';
+        note = memo('吸い込み口に根やごみが詰まった。養液が循環せず、酸素が減っていく。', `ポンプを直す（作業 ${B.laborMin.fixPump}分）。1日放っておくと根が酸欠になる。`);
+        break;
+      case 'hypoxia': {
+        const sy = SYMPTOMS['o2.low'];
+        text = `🔍 ${spot(e.target)}：${sy.name}のサイン（溶存酸素 ${Math.round(e.o2 * 100)}%）`;
+        cls = 'o';
+        note = memo(e.pump ? '止まっていた間に減った酸素がまだ戻っていない。' : sy.natural, e.pump ? '数時間で戻る。' : sy.fix, sy.look);
         break;
       }
       case 'month': text = `📅 ${e.ledger.month}か月目を締めた：利益 ${signed(totals(e.ledger).profit)}`; cls = 'o'; break;

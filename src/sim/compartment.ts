@@ -12,6 +12,8 @@ export interface Compartment {
   /** 溶質の量。salts は EC×L（EC = salts / water） */
   solutes: Record<SoluteId, number>;
   ph: number;
+  /** 溶存酸素の飽和度 0〜1（Phase 5。ポンプのエアレーションで戻り、根の呼吸で減る。v2 では魚も使う） */
+  o2: number;
 }
 
 /** 区画間の流れ（ポンプ・落差）。rate は L/h */
@@ -34,6 +36,8 @@ export function fill(c: Compartment, s: Solution): void {
   c.water = s.water;
   c.solutes = { salts: s.ec * s.water };
   c.ph = s.ph;
+  // 新しい養液は酸素が飽和している
+  c.o2 = 1;
 }
 
 export function findCompartment(cs: readonly Compartment[], id: string): Compartment {
@@ -58,6 +62,7 @@ export function applyFlows(cs: readonly Compartment[], flows: readonly Flow[]): 
       b.solutes[k] = (b.solutes[k] ?? 0) + m;
     }
     b.ph = (b.ph * b.water + a.ph * v) / (b.water + v);
+    b.o2 = (b.o2 * b.water + a.o2 * v) / (b.water + v);
     a.water -= v;
     b.water += v;
   }

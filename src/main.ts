@@ -1,7 +1,7 @@
 // 画面の組み立てとメインループ。sim は固定タイムステップ（1 tick ＝ 1時間）で進め、描画は毎フレーム
 
 import './ui/style.css';
-import { applyCommand, BUSINESS, createFarm, createSim, CROPS, cropSpec, farmTick, tick, type Command, type FarmCommand, type SimState } from './sim';
+import { applyCommand, BUSINESS, createFarm, createSim, CROPS, cropSpec, farmTick, startOutage, stopPump, tick, type Command, type FarmCommand, type SimState } from './sim';
 import { PRESETS, type PresetName } from './render/camera';
 import { modelStatus } from './render/models';
 import { View, type Quality } from './render/view';
@@ -216,6 +216,21 @@ Object.assign(window, {
     /** 経営モードを始め直す */
     farmReset() { farm.reset(createFarm()); farm.update(); },
     farmSend(c: FarmCommand) { const ok = farm.send(c); farm.update(); return ok; },
+    /**
+     * 設備のイベントを今のモードで起こす（確認用。停電は hours 時間、ポンプは栽培槽か選んでいる棚）。
+     * Phase 5 区切り3 で画面（☰ のイベントの切り替え・警報・直すボタン）をつなぐまで、画面からはイベントを起こさない
+     */
+    event(kind: 'outage' | 'pumpStop', hours = 4) {
+      if (mode === 'farm') {
+        const f = farm.state, e = kind === 'outage' ? startOutage(f.facility, hours) : stopPump(f.facility, farm.rackId());
+        f.log.push({ hour: f.hour, ...e });
+        farm.update();
+      } else {
+        const e = kind === 'outage' ? startOutage(s.facility, hours) : stopPump(s.facility, s.setup.bed);
+        s.log.push({ hour: s.hour, ...e });
+      }
+      dirty = true;
+    },
     /** 図鑑を開く（'crops' / 'symptoms'） */
     zukan: openZukan,
     quiz,

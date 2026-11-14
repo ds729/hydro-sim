@@ -1,7 +1,7 @@
 // 栽培日誌：sim のイベントを文章にする（sim 側は文言を持たない）
 
 import { CROPS, HYDROPONIC, SUPPLIES, type Command, type CropSpec, type DoseSupply, type Factor, type SimEvent } from '../sim';
-import { symptomOf } from './symptoms';
+import { SYMPTOMS, symptomOf } from './symptoms';
 
 const DOSE: Record<DoseSupply, (amount: number) => string> = {
   fertilizer: a => `肥料を${a}mL追加（ECが上がります）`,
@@ -12,6 +12,7 @@ const DOSE: Record<DoseSupply, (amount: number) => string> = {
 
 function commandText(c: Command): string {
   if (c.type === 'dose') return DOSE[c.supply](c.amount);
+  if (c.type === 'fixPump') return 'ポンプを直した（吸い込み口の詰まりを掃除して動かし直した）';
   const s = HYDROPONIC.compartments.find(d => d.id === c.target)!.initial;
   return `養液を全交換（EC${s.ec.toFixed(1)}・pH${s.ph.toFixed(1)}・${s.water.toFixed(1)}Lに戻りました）`;
 }
@@ -23,6 +24,18 @@ const timeText = (hour: number) => `Day ${Math.floor(hour / 24) + 1} ${String(ho
 const VALUE: Record<Factor, [string, string]> = { ec: ['EC', ''], ph: ['pH', ''], water: ['液量', 'L'] };
 
 type Advice = Extract<SimEvent, { kind: 'advice' }>;
+type Hypoxia = Extract<SimEvent, { kind: 'hypoxia' }>;
+
+/** 観察メモ（根の酸欠）：溶存酸素 → 原因 → 結果 → 対処 */
+function hypoxiaHtml(e: Hypoxia): string {
+  const sy = SYMPTOMS['o2.low'];
+  const cause = e.pump ? 'ポンプは回っているが、止まっていた間に減った酸素がまだ戻っていない。' : sy.natural;
+  return `<b>${sy.icon} ${sy.label}（${sy.name}）</b> 溶存酸素 ${Math.round(e.o2 * 100)}%<small class="jb">飽和に対して</small>`
+    + `<div class="jw"><i>原因</i>${cause}</div>`
+    + `<div class="jw"><i>結果</i>${sy.look}${e.fit < 0.5 ? '健康度も下がっていく。' : ''}</div>`
+    + `<div class="jw"><i>対処</i>${e.pump ? '数時間で戻る。ポンプを止めたままにしない。' : sy.fix}</div>`
+    + `<details data-k="${e.hour}o2"><summary>なぜ？</summary>${sy.why}</details>`;
+}
 
 /** 観察メモ（なぜ？ログ）：症状・値と適正帯 → 原因 → 結果 → 対処。「なぜ？」を開くと仕組みを出す */
 function adviceHtml(e: Advice, spec: CropSpec): string {
@@ -39,18 +52,23 @@ function adviceHtml(e: Advice, spec: CropSpec): string {
 }
 
 /** 観察メモ以外の記録の文章 */
-export function eventText(e: Exclude<SimEvent, Advice>): string {
+export function eventText(e: Exclude<SimEvent, Advice | Hypoxia>): string {
   switch (e.kind) {
     case 'start': return `${CROPS[e.crop].name}の栽培開始。EC・pH・液量を適正帯（緑）に保とう。${CROPS[e.crop].note}`;
     case 'command': return commandText(e.command);
     case 'morning':
       return `朝の記録：EC ${e.ec.toFixed(1)}、pH ${e.ph.toFixed(1)}、液量 ${e.water.toFixed(1)}L、生育 ${Math.round(e.growth * 100)}%`;
+    case 'outage': return `停電（${e.hours}時間ほど）。照明とポンプが止まった。照明が点く時間帯は育たない`;
+    case 'powerBack': return '電気が戻った。照明とポンプが動き出した';
+    case 'pumpStop': return 'ポンプが止まった（吸い込み口の詰まり）。養液が循環せず、酸素が減っていく。早めに直す';
   }
 }
 
 /** 日誌の表示クラスとアイコン（観察メモ 🔍・定点記録 📝・操作 ✏️）。観察メモの本文は症状のアイコンを使う */
 export const eventStyle = (e: SimEvent): [string, string] =>
-  e.kind === 'advice' ? ['o', '🔍'] : e.kind === 'morning' ? ['d', '📝'] : ['a', '✏️'];
+  e.kind === 'advice' || e.kind === 'hypoxia' ? ['o', '🔍'] : e.kind === 'morning' ? ['d', '📝']
+    : e.kind === 'outage' ? ['o', '⚡'] : e.kind === 'pumpStop' ? ['o', '🛑'] : e.kind === 'powerBack' ? ['a', '💡']
+      : e.kind === 'command' && e.command.type === 'fixPump' ? ['a', '🔧'] : ['a', '✏️'];
 
 /** 日誌に出す件数（新しい順） */
 export const JOURNAL_SIZE = 12;
@@ -58,7 +76,7 @@ export const JOURNAL_SIZE = 12;
 export function journalHtml(log: readonly SimEvent[], spec: CropSpec): string {
   return log.slice(-JOURNAL_SIZE).reverse().map(e => {
     const [cls, icon] = eventStyle(e);
-    const body = e.kind === 'advice' ? adviceHtml(e, spec) : `${icon} ${eventText(e)}`;
+    const body = e.kind === 'advice' ? adviceHtml(e, spec) : e.kind === 'hypoxia' ? hypoxiaHtml(e) : `${icon} ${eventText(e)}`;
     return `<div class="jn ${cls}"><small style="margin:0">${timeText(e.hour)}</small>${body}</div>`;
   }).join('');
 }
