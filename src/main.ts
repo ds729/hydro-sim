@@ -13,6 +13,7 @@ import { QuizPanel } from './ui/quiz';
 import { FarmPanel } from './ui/farm';
 import { markSeen, openZukan } from './ui/zukan';
 import { alarmed, alarmHtml } from './ui/alarm';
+import { Sound, soundsOf } from './ui/sound';
 
 const $ = (id: string) => document.getElementById(id)!;
 const app = $('app'), menu = $('mb');
@@ -126,6 +127,26 @@ const evBtns = ([[false, 'なし'], [true, 'あり']] as const).map(([v, label])
   return [v, b] as const;
 });
 
+// 効果音（☰ の「音」。既定はなし）。記録の新しい分から鳴らす
+const sound = new Sound();
+const sndBtns = ([[false, 'なし'], [true, 'あり']] as const).map(([v, label]) => {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.title = v ? '操作・警報・収穫の音を鳴らす（Web Audio で作る音）' : '音を鳴らさない';
+  b.onclick = () => { sound.set(v); for (const [k, x] of sndBtns) x.classList.toggle('on', k === v); };
+  b.classList.toggle('on', v === sound.enabled);
+  $('snd').appendChild(b);
+  return [v, b] as const;
+});
+let heard: { log: readonly unknown[]; n: number } = { log: [], n: 0 };
+/** 記録の新しい分の音を鳴らす。警報の音は、まだ続いているときだけ（予備ポンプがすぐ切り替えたときは鳴らさない） */
+function hear(log: readonly { kind: string }[], fs: { outage: number; pumpDown: string[] }) {
+  if (log !== heard.log) { heard = { log, n: log.length }; return; }
+  const names = soundsOf(log.slice(heard.n) as Parameters<typeof soundsOf>[0]);
+  heard.n = log.length;
+  for (const n of names) if (n !== 'alarm' || fs.outage > 0 || fs.pumpDown.length) sound.play(n);
+}
+
 // 警報（HUD の上）：停電・ポンプの停止と、ポンプを直すボタン。中身が変わったときだけ書き換える（押している最中のボタンを作り直さない）
 const al = $('al');
 function updateAlarm() {
@@ -135,8 +156,11 @@ function updateAlarm() {
     const f = farm.state;
     html = alarmHtml(f.facility, f.racks.map((r, i) => [r.id, f.racks.length > 1 ? `棚${i + 1}` : '棚']), { ups: f.equipment.ups > 0, labor: true });
   }
-  if (al.dataset.h !== html) { al.dataset.h = html; al.innerHTML = html; }
+  if (al.dataset.h !== html) { al.dataset.h = html; al.innerHTML = html; alarmAt = performance.now(); }
+  // 警報が続いている間は 8秒ごとに小さく鳴らす
+  if (html && performance.now() - alarmAt > 8000) { alarmAt = performance.now(); sound.play('alarmRepeat'); }
 }
+let alarmAt = 0;
 al.addEventListener('click', e => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-fix]');
   if (!b) return;
@@ -224,10 +248,11 @@ function loop(now: number) {
     while (acc >= 1 && speed) { acc--; farmTick(f); farm.update(); dirty = true; }
     slowOnAlarm(f.log, n, f.facility);
   }
+  if (mode === 'grow') hear(s.log, s.facility); else if (mode === 'farm') hear(farm.state.log, farm.state.facility);
   sinceHud += dt;
   if (mode === 'grow') {
     if (dirty || sinceHud > 0.1) { hud.update(s); updateAlarm(); dirty = false; sinceHud = 0; }
-    if (s.result && !resultShown) { resultShown = true; showResult(s.result, s.crop.id, restart); }
+    if (s.result && !resultShown) { resultShown = true; showResult(s.result, s.crop.id, restart); if (s.result.outcome === 'harvest') sound.play('harvest'); }
   } else if (dirty || sinceHud > 0.1) { if (mode === 'farm') farm.update(); updateAlarm(); dirty = false; sinceHud = 0; }
   // 部屋の時計：進めている途中の端数（acc）も足して、朝夕の光を滑らかに変える。症状診断は昼の光で見せる
   if (mode === 'farm') view.frameFarm(farm.state, farm.rack, farm.slot, farm.sim ?? s, now / 1000, farm.blind, farm.state.hour + (speed ? acc : 0));
@@ -284,6 +309,8 @@ Object.assign(window, {
     /** 図鑑を開く（'crops' / 'symptoms'） */
     zukan: openZukan,
     quiz,
+    /** 効果音（sound.set(true) でオン。確認用） */
+    sound,
     /** 直近1秒の平均 fps */
     get fps() { return fps; },
     /** 画質を変える（例 hydro.quality({shadows:false,dpr:1})）。ボタンの表示と保存値は変えない */

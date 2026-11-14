@@ -3,11 +3,12 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { LIGHT, bedOf, cropSpec, diagnose, mulberry32, o2Fitness, powered, pumpRunning, type CropSpec, type Diagnosis, type FarmState, type SimState } from '../sim';
+import { LIGHT, bedOf, cropSpec, diagnose, mulberry32, o2Fitness, powered, pumpRunning, rackValues, type CropSpec, type Diagnosis, type FarmState, type SimState } from '../sim';
 import { bakedShadow, boxSet, Builder, LED, mat, SLAB, type BoxSpec } from './build';
 import { loadModel } from './models';
 import { Monitor, type Blind } from './monitor';
-import { FarmRacks } from './farmrack';
+import { FarmRacks, RACK_TANK, tankWaterY } from './farmrack';
+import { DOSE_COLOR, Particles } from './particles';
 import { C_DEAD, Seedlings, SYMPTOM } from './seedling';
 
 /** 栽培槽：幅・奥行き・水位の最大高さ・底板の上面 */
@@ -63,6 +64,12 @@ interface Seedling { x: number; z: number; delay: number; size: number; phase: n
 interface Power { on: boolean; pumpDown: boolean; running: boolean }
 /** 停電中の部屋の光の割合（天井灯が消え、高窓からの光だけ。昼は窓の分だけ明るい） */
 const OUT_NIGHT = 0.25, OUT_DAY = 0.45;
+/** 資材を入れる口（養液タンクの点検口。部屋の座標）としずくを落とし始める高さ・蓋の高さ */
+const PORT = [3.7, 1.0] as const, PORT_DROP = 1.65, PORT_LID = 1.24;
+/** ポンプの吐出口（栽培槽の右の面、部屋の座標。nutrient_tank の配管の先） */
+const INLET = [2.56, 0.5, 1.0] as const;
+/** 資材を入れてから、その色の養液が吐出口から出てくるまでと、出ている間（秒） */
+const TINT_DELAY = 0.8, TINT_FOR = 1.6;
 /** ポンプの運転ランプの色（運転・停止） */
 const PUMP_OK = 0x5fe09a, PUMP_NG = 0xff4040;
 type Lamp = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
@@ -113,6 +120,14 @@ export class Diorama {
   private screen = '';
   /** 表示中の通電（0〜1。停電で滑らかに暗くする） */
   private shownPower = 1;
+  /** パーティクル（資材のしずく・水流・泡）と、前のフレームの時刻・見ている記録（新しい操作だけに反応する） */
+  private fx: Particles;
+  private lastT = -1;
+  private seen: { log: readonly unknown[]; n: number } = { log: [], n: 0 };
+  /** 資材の色の養液が吐出口から出る時間（秒の範囲）と色 */
+  private tint = { from: 0, to: 0, color: 0 };
+  /** 描いているモード（変わったらパーティクルを消す） */
+  private scene3 = '';
 
   constructor(private rand: () => number) {
     const sc = this.scene;
@@ -145,6 +160,7 @@ export class Diorama {
     ], 0.45, 24);
     ao.position.y = 0.02;
     sc.add(ao);
+    this.fx = new Particles(sc);
     const b = new Builder(sc);
     this.buildSlab(b);
     this.buildRoom(b);
@@ -483,6 +499,16 @@ export class Diorama {
       du.updateMatrix();
       this.bubbles.setMatrixAt(j, du.matrix);
     }
+    // 資材は養液タンクの点検口に入れ、ポンプが回っていれば少し遅れてその色の養液が吐出口から出てくる
+    const dt = this.step(t, 'grow', s.log);
+    for (const { cmd } of this.newDoses(s.log)) {
+      const color = this.doseColor(cmd), all = cmd.type === 'replaceSolution';
+      this.fx.dose(color, PORT[0], PORT_DROP, PORT[1], PORT_LID, all ? 36 : 10, all ? 0.18 : 0.06);
+      if (!all && cmd.supply !== 'water') this.tint = { from: t + TINT_DELAY, to: t + TINT_DELAY + TINT_FOR, color };
+    }
+    // ポンプの水流（吐出口が水の中にあるときだけ）
+    if (running && WB + h > INLET[1] + 0.12) this.fx.stream(dt, INLET[0], INLET[1], INLET[2], t >= this.tint.from && t < this.tint.to ? this.tint.color : null);
+    this.fx.update(dt);
     this.plants.commit();
     this.roots.instanceMatrix.needsUpdate = true;
     this.roots.instanceColor!.needsUpdate = true;
@@ -504,8 +530,41 @@ export class Diorama {
     // 経営モードのポンプの運転ランプ（養液タンク）は棚のどれかが止まっていたら停止を示す。非常用電源があれば停電中も回る
     const fx = f.facility, ups = f.equipment.ups > 0, down = fx.pumpDown.length > 0;
     const pw: Power = { on: powered(fx), pumpDown: down, running: !down && (powered(fx) || ups) };
+    // 資材は棚の養液タンクに入れる（自動給水・pH 自動調整も）。ポンプが回っている棚はタンクに泡
+    const dt = this.step(t, 'farm', f.log);
+    for (const { cmd, auto } of this.newDoses(f.log)) {
+      const i = f.racks.findIndex(r => r.id === cmd.target);
+      if (i < 0) continue;
+      const wy = tankWaterY(rackValues(f, cmd.target).water), all = cmd.type === 'replaceSolution';
+      this.fx.dose(this.doseColor(cmd), RACK_TANK.x[i], RACK_TANK.top + 0.08, RACK_TANK.z, wy, all ? 20 : auto ? 3 : 8, all ? 0.25 : 0.08);
+    }
+    f.racks.forEach((r, i) => {
+      if (fx.pumpDown.includes(r.id) || !(pw.on || ups)) return;
+      this.fx.bubbles(r.id, dt, 8, RACK_TANK.x[i], 0.04, RACK_TANK.z, RACK_TANK.w, RACK_TANK.d, tankWaterY(rackValues(f, r.id).water));
+    });
+    this.fx.update(dt);
     this.setClock(clock, pw.on);
     this.panel(mon, diagnose(mon), t, blind, clock, pw);
+  }
+
+  /** 前のフレームからの秒（初回・タブを戻したときは小さく）。モードが変わったらパーティクルを消し、記録の見始めを今にする */
+  private step(t: number, scene: string, log: readonly unknown[]): number {
+    const dt = this.lastT < 0 ? 0 : Math.min(0.1, Math.max(0, t - this.lastT));
+    this.lastT = t;
+    if (scene !== this.scene3) { this.scene3 = scene; this.fx.clear(); this.seen = { log, n: log.length }; }
+    return dt;
+  }
+
+  /** 記録に新しく入った養液の操作（資材・全交換）を返す。記録が別のもの（始め直し・別の sim）なら今から見る */
+  private newDoses<E extends { kind: string }>(log: readonly E[]): { cmd: { type: string; target: string; supply?: string }; auto?: boolean }[] {
+    if (log !== this.seen.log) { this.seen = { log, n: log.length }; return []; }
+    const out = log.slice(this.seen.n).filter(e => e.kind === 'command') as unknown as { command: { type: string; target: string; supply?: string }; auto?: boolean }[];
+    this.seen.n = log.length;
+    return out.filter(e => e.command.type === 'dose' || e.command.type === 'replaceSolution').map(e => ({ cmd: e.command, auto: e.auto }));
+  }
+
+  private doseColor(c: { type: string; supply?: string }) {
+    return DOSE_COLOR[(c.type === 'dose' ? c.supply : 'solution') as keyof typeof DOSE_COLOR];
   }
 
   /**

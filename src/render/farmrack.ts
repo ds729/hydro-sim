@@ -40,6 +40,10 @@ function instanced(parent: THREE.Object3D, boxes: Box[], o?: THREE.MeshStandardM
   return m;
 }
 
+/** 棚の養液タンク：中心の x・z、幅・奥行き（内側）、口の高さ、液量 L から水面の高さ（満水＝容量 3L×8枚＝液量 3L/枚） */
+export const RACK_TANK = { x: RACK_X, z: RACK_Z, w: RW - 0.2, d: RD - 0.12, top: 0.31 };
+export const tankWaterY = (waterPerTray: number) => 0.02 + Math.max(0.01, Math.min(1, waterPerTray / 3)) * 0.27;
+
 /** トレイの中心（部屋の座標）。slot 0・1 が最上段（画面のトレイの並びと同じ）、偶数が左 */
 export function trayPos(rack: number, slot: number): THREE.Vector3 {
   const y = SHELVES[SHELVES.length - 1 - Math.floor(slot / 2)] + 0.015 + TH / 2;
@@ -173,7 +177,7 @@ export class FarmRacks {
       // 根の酸欠（溶存酸素は棚で1つ）：苗がしおれる
       const hyp = 1 - o2Fitness(f.compartments.find(c => c.id === r.id)!);
       // 養液タンクの水位（液量は棚全体で、満水＝容量）
-      const h = Math.max(0.01, Math.min(1, v.water / 3)) * 0.27, w = this.waters[ri];
+      const h = tankWaterY(v.water) - 0.02, w = this.waters[ri];
       w.scale.y = h;
       w.position.y = 0.02 + h / 2;
       r.slots.forEach((t, si) => {
