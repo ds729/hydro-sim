@@ -3,7 +3,7 @@
 // 苗は揺らさない（台数が多いので、状態が変わったときだけ置き直す）
 
 import * as THREE from 'three';
-import { BUSINESS, CROPS, freshness, mulberry32, rackValues, side, trayFitness, LEAF_SHAPES, type FarmState, type LeafShape } from '../sim';
+import { BUSINESS, CROPS, freshness, mulberry32, o2Fitness, powered, rackValues, side, trayFitness, LEAF_SHAPES, type FarmState, type LeafShape } from '../sim';
 import { bakedShadow, LED, mat } from './build';
 import { C_DEAD, Seedlings, SYMPTOM } from './seedling';
 
@@ -18,6 +18,9 @@ const PX = 4, PZ = 3, PER = PX * PZ;
 /** 苗の茎の高さの上限（トレイの上面から LED まで約 0.45m。葉の分を引く） */
 const PLANT_MAX = 0.3;
 const SLOTS = BUSINESS.slotsPerRack, MAX = BUSINESS.maxRacks;
+/** 給液ポンプ（養液タンクの上、右奥の給液管の根元）の中心と、運転ランプの位置（ポンプの正面） */
+const pumpPos = (x0: number): [number, number, number] => [x0 + RW / 2 - 0.12, 0.37, RACK_Z - RD / 2 + 0.11];
+const LAMP_OK = new THREE.Color(0x5fe09a), LAMP_NG = new THREE.Color(0xff4040), LAMP_OFF = new THREE.Color(0x3a4048);
 
 type Box = [w: number, h: number, d: number, color: number, x: number, y: number, z: number];
 
@@ -57,6 +60,8 @@ export class FarmRacks {
   private shadows: THREE.Mesh[] = [];
   private waters: THREE.Mesh[] = [];
   private sel = new THREE.Group();
+  /** 給液ポンプの運転ランプ（棚ごと。運転中は緑、止まったら赤の点滅、停電で回っていなければ消灯） */
+  private lamps: THREE.InstancedMesh;
   private sets = {} as Record<LeafShape, Seedlings>;
   /** トレイの中の苗の配置 [x, z, 遅れ, 大きさ, 向き, 傾き] */
   private layout: [number, number, number, number, number, number][] = [];
@@ -81,6 +86,9 @@ export class FarmRacks {
         for (const i of [-1, 1]) f.push([0.03, 0.03, RD, 0xa9b3bb, x0 + i * (RW / 2 - 0.02), y, RACK_Z]);
       }
       f.push([0.03, SHELVES[3] - 0.25, 0.03, 0x4fb3b0, x0 + RW / 2 - 0.07, (SHELVES[3] + 0.25) / 2, RACK_Z - RD / 2 + 0.06]);
+      // 給液ポンプ（養液タンクの上）
+      const [px, py, pz] = pumpPos(x0);
+      f.push([0.13, 0.11, 0.12, 0x3d4650, px, py, pz]);
       // 各段の上の LED バー（上の棚板の下、最上段は天井の枠の下）
       for (let k = 0; k < SHELVES.length; k++) {
         const top = k + 1 < SHELVES.length ? SHELVES[k + 1] : RH - 0.02;
@@ -116,6 +124,15 @@ export class FarmRacks {
       this.sel.add(m);
     }
     this.group.add(this.sel);
+    this.lamps = new THREE.InstancedMesh(new THREE.BoxGeometry(0.04, 0.03, 0.012), new THREE.MeshBasicMaterial({ toneMapped: false }), MAX);
+    RACK_X.forEach((x0, i) => {
+      const [px, py, pz] = pumpPos(x0), du = this.du;
+      du.position.set(px, py + 0.02, pz + 0.066);
+      du.updateMatrix();
+      this.lamps.setMatrixAt(i, du.matrix);
+      this.lamps.setColorAt(i, LAMP_OK);
+    });
+    this.group.add(this.lamps);
     // 苗の配置は棚・トレイによらず同じ（栽培槽の苗の乱数を変えないよう別のシードで作る）
     const r = mulberry32(13);
     for (let i = 0; i < PX; i++) for (let j = 0; j < PZ; j++) {
@@ -132,8 +149,17 @@ export class FarmRacks {
 
   set visible(v: boolean) { this.group.visible = v; }
 
-  /** 状態を見た目に反映する（状態か選択が変わったときだけ置き直す） */
-  update(f: FarmState, rack: number, slot: number): void {
+  /** ポンプの運転ランプ（点滅するので毎フレーム）。t は秒 */
+  private pumpLamps(f: FarmState, t: number) {
+    const fx = f.facility, on = powered(fx) || f.equipment.ups > 0, blink = Math.sin(t * 9) > 0;
+    this.lamps.count = f.racks.length;
+    f.racks.forEach((r, i) => this.lamps.setColorAt(i, fx.pumpDown.includes(r.id) ? (blink ? LAMP_NG : LAMP_OFF) : on ? LAMP_OK : LAMP_OFF));
+    this.lamps.instanceColor!.needsUpdate = true;
+  }
+
+  /** 状態を見た目に反映する（苗とトレイは状態か選択が変わったときだけ置き直す）。t は秒 */
+  update(f: FarmState, rack: number, slot: number, t = 0): void {
+    this.pumpLamps(f, t);
     const n = f.racks.length, key = `${f.hour}:${f.log.length}:${n}:${rack}:${slot}`;
     if (key === this.key) return;
     this.key = key;
@@ -144,6 +170,8 @@ export class FarmRacks {
     const used = Object.fromEntries(LEAF_SHAPES.map(s => [s, 0])) as Record<LeafShape, number>, du = this.du;
     f.racks.forEach((r, ri) => {
       const v = rackValues(f, r.id);
+      // 根の酸欠（溶存酸素は棚で1つ）：苗がしおれる
+      const hyp = 1 - o2Fitness(f.compartments.find(c => c.id === r.id)!);
       // 養液タンクの水位（液量は棚全体で、満水＝容量）
       const h = Math.max(0.01, Math.min(1, v.water / 3)) * 0.27, w = this.waters[ri];
       w.scale.y = h;
@@ -162,7 +190,7 @@ export class FarmRacks {
         // 育ちすぎ（適期を過ぎて価値が落ちる）は枯れの色に寄せ、葉を垂らす
         const over = 1 - freshness(t, f.hour);
         const sick = Math.min(1, 1 - hp / 100 + ws * 0.4 + over * 0.6);
-        const wilt = worst.key === 'water' && sd === 'low' ? ws : 0, small = worst.key === 'ec' && sd === 'high' ? ws * 0.35 : 0;
+        const wilt = hp > 0 ? Math.max(worst.key === 'water' && sd === 'low' ? ws : 0, hyp * 0.8) : 0, small = worst.key === 'ec' && sd === 'high' ? ws * 0.35 : 0;
         this.cs.set(look.stem);
         this.cl.set(look.leaf);
         const symptom = SYMPTOM[worst.key][sd === 'low' ? 0 : 1], dead = hp <= 0 ? 1 : Math.max((1 - hp / 100) * 0.9, over * 0.7);

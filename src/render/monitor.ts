@@ -23,8 +23,8 @@ export class Monitor {
     this.texture.colorSpace = THREE.SRGBColorSpace;
   }
 
-  /** clock は部屋の時計（経過時間 h。経営モードでは s.hour が播いてからの時間なので別に渡す） */
-  draw(s: SimState, d: Diagnosis, clock = s.hour): void {
+  /** clock は部屋の時計（経過時間 h。経営モードでは s.hour が播いてからの時間なので別に渡す）。alert は警報の帯（ポンプの停止） */
+  draw(s: SimState, d: Diagnosis, clock = s.hour, alert: string | null = null): void {
     const x = this.ctx, days = cropSpec(s).days, dy = dayOf(s), { values: v, fitness: f } = d;
     x.fillStyle = '#0f2a2e';
     x.fillRect(0, 0, W, H);
@@ -72,11 +72,31 @@ export class Monitor {
     x.fillRect(16, 246, 480, 14);
     x.fillStyle = '#5fe09a';
     x.fillRect(16, 246, 480 * s.crop.growth, 14);
+    this.alert(alert);
+    this.texture.needsUpdate = true;
+  }
+
+  /** 警報の帯（見出しの行を覆う）。赤地に白で目立たせる */
+  private alert(text: string | null) {
+    if (!text) return;
+    const x = this.ctx;
+    x.fillStyle = '#d64545';
+    x.fillRect(0, 0, W, 46);
+    x.fillStyle = '#fff';
+    x.font = 'bold 22px sans-serif';
+    x.fillText('⚠ ' + text, 16, 31);
+  }
+
+  /** 停電：画面が消える（制御盤とモニタは非常用電源につながっていない設定） */
+  drawOff(): void {
+    const x = this.ctx;
+    x.fillStyle = '#06090a';
+    x.fillRect(0, 0, W, H);
     this.texture.needsUpdate = true;
   }
 
   /** 値を伏せる。quiz＝症状診断モードの出題中、noProbe＝経営モードで連続測定センサがない */
-  drawBlind(why: Blind): void {
+  drawBlind(why: Blind, alert: string | null = null): void {
     const x = this.ctx;
     x.fillStyle = '#0f2a2e';
     x.fillRect(0, 0, W, H);
@@ -87,6 +107,7 @@ export class Monitor {
     x.font = '20px sans-serif';
     x.fillText(why === 'quiz' ? 'センサの値は答えたあとに表示します' : 'ペン型の計器で測った値は画面の左に出ます', 16, 140);
     if (why === 'noProbe') x.fillText('連続測定センサを付けると毎時表示します', 16, 172);
+    this.alert(alert);
     this.texture.needsUpdate = true;
   }
 }

@@ -12,6 +12,7 @@ import { mountTools } from './ui/tools';
 import { QuizPanel } from './ui/quiz';
 import { FarmPanel } from './ui/farm';
 import { markSeen, openZukan } from './ui/zukan';
+import { alarmed, alarmHtml } from './ui/alarm';
 
 const $ = (id: string) => document.getElementById(id)!;
 const app = $('app'), menu = $('mb');
@@ -20,7 +21,14 @@ const MOBILE = matchMedia('(max-width:720px),(max-height:500px)');
 /** 横向きスマホ：HUD は左の縦長、道具バーは右の縦並び（style.css と同じ条件） */
 const LAND = matchMedia('(max-height:500px) and (min-aspect-ratio:4/3)');
 
-let s: SimState = createSim();
+/** 栽培モードで停電・ポンプの停止を起こすか（☰ の「イベント」。既定はなし。このブラウザに保存） */
+const EVENTS_KEY = 'hydro-sim.events';
+let growEvents = false;
+try { growEvents = localStorage.getItem(EVENTS_KEY) === '1'; } catch { /* 保存できない環境では既定のまま */ }
+/** イベントの乱数のシード（画面では毎回変える。同じ日に同じことが起きないように） */
+const newSeed = () => (Math.random() * 2 ** 32) >>> 0;
+
+let s: SimState = createSim({ events: growEvents, seed: newSeed() });
 /** 1秒あたりに進める時間（h） */
 let speed = 4;
 /** HUD を描き直す必要があるか */
@@ -41,7 +49,7 @@ let mode: Mode = 'grow';
 /** 症状診断モード。診断中は栽培を止め、栽培の状態はそのまま残す */
 const quiz = new QuizPanel(() => setMode('grow'));
 /** 経営モード。栽培モードとは別の状態（FarmState）で、モードを切り替えても続きから。月を締めたら時間を止める */
-const farm = new FarmPanel(createFarm(), () => setSpeed(0));
+const farm = new FarmPanel(createFarm({ events: true, seed: newSeed() }), () => setSpeed(0));
 
 /** 道具バーの操作。経営モードでは選んでいる棚に効かせる */
 function send(c: Command) {
@@ -77,7 +85,7 @@ const modeBtns = ([['grow', '栽培'], ['quiz', '症状診断'], ['farm', '経�
 
 /** 始め直す。作物を省くと今の作物のまま */
 function restart(crop = s.crop.id) {
-  s = createSim({ crop });
+  s = createSim({ crop, events: growEvents, seed: newSeed() });
   markSeen('crops', crop);
   hud.setCrop(cropSpec(s));
   markCrop();
@@ -102,6 +110,44 @@ function markCrop() {
   for (const [id, b] of cropBtns) b.classList.toggle('on', id === s.crop.id);
 }
 markCrop();
+
+// イベント（栽培モードの ☰）：あり にすると停電・ポンプの停止が起きる。なし に戻しても、起きている停電・止まったポンプはそのまま
+const evBtns = ([[false, 'なし'], [true, 'あり']] as const).map(([v, label]) => {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.title = v ? '停電とポンプの停止が起きる（平均 10日・12日に1回）。警報が出たら ×1 に落とす' : 'EC・pH・液量の管理に絞る';
+  b.onclick = () => {
+    growEvents = s.facility.events = v;
+    for (const [k, x] of evBtns) x.classList.toggle('on', k === v);
+    try { localStorage.setItem(EVENTS_KEY, v ? '1' : '0'); } catch { /* 保存できなくても今回は効く */ }
+  };
+  b.classList.toggle('on', v === growEvents);
+  $('ev').appendChild(b);
+  return [v, b] as const;
+});
+
+// 警報（HUD の上）：停電・ポンプの停止と、ポンプを直すボタン。中身が変わったときだけ書き換える（押している最中のボタンを作り直さない）
+const al = $('al');
+function updateAlarm() {
+  let html = '';
+  if (mode === 'grow') html = alarmHtml(s.facility, [[s.setup.bed, '栽培槽']]);
+  else if (mode === 'farm') {
+    const f = farm.state;
+    html = alarmHtml(f.facility, f.racks.map((r, i) => [r.id, f.racks.length > 1 ? `棚${i + 1}` : '棚']), { ups: f.equipment.ups > 0, labor: true });
+  }
+  if (al.dataset.h !== html) { al.dataset.h = html; al.innerHTML = html; }
+}
+al.addEventListener('click', e => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-fix]');
+  if (!b) return;
+  const cmd = { type: 'fixPump', target: b.dataset.fix! } as const;
+  if (mode === 'farm') farm.send(cmd); else if (mode === 'grow') applyCommand(s, cmd);
+  dirty = true;
+});
+/** 警報が出たら（停電・ポンプの停止が起きて、まだ続いていたら）時間を ×1 に落とす。速いままだと 1日が数秒で過ぎ、気づく前に根が傷む */
+function slowOnAlarm(log: readonly { kind: string }[], from: number, fs: { outage: number; pumpDown: string[] }) {
+  if (speed > 1 && alarmed(log, from) && (fs.outage > 0 || fs.pumpDown.length)) setSpeed(1);
+}
 
 // 画面サイズ・パネル位置から、3D がパネルに隠れない領域を決めてカメラを合わせ直す
 function layout() {
@@ -168,17 +214,21 @@ function loop(now: number) {
   last = now;
   if (mode === 'grow' && !s.result && speed) {
     acc += dt * speed;
+    const n = s.log.length;
     while (acc >= 1 && !s.result) { acc--; tick(s); dirty = true; }
+    slowOnAlarm(s.log, n, s.facility);
   } else if (mode === 'farm' && speed) {
     acc += dt * speed;
     // 月を締めると setSpeed(0) で止まるので、そこで抜ける
-    while (acc >= 1 && speed) { acc--; farmTick(farm.state); farm.update(); dirty = true; }
+    const f = farm.state, n = f.log.length;
+    while (acc >= 1 && speed) { acc--; farmTick(f); farm.update(); dirty = true; }
+    slowOnAlarm(f.log, n, f.facility);
   }
   sinceHud += dt;
   if (mode === 'grow') {
-    if (dirty || sinceHud > 0.1) { hud.update(s); dirty = false; sinceHud = 0; }
+    if (dirty || sinceHud > 0.1) { hud.update(s); updateAlarm(); dirty = false; sinceHud = 0; }
     if (s.result && !resultShown) { resultShown = true; showResult(s.result, s.crop.id, restart); }
-  } else if (mode === 'farm' && (dirty || sinceHud > 0.1)) { farm.update(); dirty = false; sinceHud = 0; }
+  } else if (dirty || sinceHud > 0.1) { if (mode === 'farm') farm.update(); updateAlarm(); dirty = false; sinceHud = 0; }
   // 部屋の時計：進めている途中の端数（acc）も足して、朝夕の光を滑らかに変える。症状診断は昼の光で見せる
   if (mode === 'farm') view.frameFarm(farm.state, farm.rack, farm.slot, farm.sim ?? s, now / 1000, farm.blind, farm.state.hour + (speed ? acc : 0));
   else if (quiz.sim) view.frame(quiz.sim, now / 1000, quiz.blind, 12);
@@ -213,12 +263,12 @@ Object.assign(window, {
     farm,
     /** 経営モードを n 時間進める（速度とは無関係に即時） */
     farmTick(n = 1) { for (let i = 0; i < n; i++) farmTick(farm.state); farm.update(); },
-    /** 経営モードを始め直す */
-    farmReset() { farm.reset(createFarm()); farm.update(); },
+    /** 経営モードを始め直す（既定は画面と同じくイベントあり。docs/scripts/farm-month.js は {events:false} で回す） */
+    farmReset(opts: { events?: boolean; seed?: number } = {}) { farm.reset(createFarm({ events: true, seed: newSeed(), ...opts })); farm.update(); },
     farmSend(c: FarmCommand) { const ok = farm.send(c); farm.update(); return ok; },
     /**
      * 設備のイベントを今のモードで起こす（確認用。停電は hours 時間、ポンプは栽培槽か選んでいる棚）。
-     * Phase 5 区切り3 で画面（☰ のイベントの切り替え・警報・直すボタン）をつなぐまで、画面からはイベントを起こさない
+     * 抽選（栽培は ☰ のイベント あり、経営は常に）を待たずに起こす
      */
     event(kind: 'outage' | 'pumpStop', hours = 4) {
       if (mode === 'farm') {

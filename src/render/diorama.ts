@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { LIGHT, bedOf, cropSpec, diagnose, mulberry32, type CropSpec, type Diagnosis, type FarmState, type SimState } from '../sim';
+import { LIGHT, bedOf, cropSpec, diagnose, mulberry32, o2Fitness, powered, pumpRunning, type CropSpec, type Diagnosis, type FarmState, type SimState } from '../sim';
 import { bakedShadow, boxSet, Builder, LED, mat, SLAB, type BoxSpec } from './build';
 import { loadModel } from './models';
 import { Monitor, type Blind } from './monitor';
@@ -59,6 +59,12 @@ const WINDOWS_X = [-3.425, -2.275, 2.325, 3.475], WINDOW_Y = 3.55;
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 interface Seedling { x: number; z: number; delay: number; size: number; phase: number }
+/** 設備の見た目：通電しているか、止まっているポンプがあるか、（選んでいる区画の）ポンプが回っているか */
+interface Power { on: boolean; pumpDown: boolean; running: boolean }
+/** 停電中の部屋の光の割合（天井灯が消え、高窓からの光だけ。昼は窓の分だけ明るい） */
+const OUT_NIGHT = 0.25, OUT_DAY = 0.45;
+/** ポンプの運転ランプの色（運転・停止） */
+const PUMP_OK = 0x5fe09a, PUMP_NG = 0xff4040;
 type Lamp = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
 
 export class Diorama {
@@ -97,14 +103,16 @@ export class Diorama {
   /** 作物の健康な茎・葉の色（update で crops.json の look から入れる） */
   private stemColor = new THREE.Color();
   private leafColor = new THREE.Color();
-  /** モニタを伏せているか（切り替わったらすぐ描き直す） */
-  private blind: Blind = false;
   /** 表示中の液量（実際の値に滑らかに追従させる） */
   private shownWater = 2;
   /** 生育段階（4段階）が変わった時刻。苗が弾む演出に使う */
   private stage = 0;
   private popAt = -9;
   private monitorAt = -9;
+  /** モニタに描いている画面（変わったらすぐ描き直す） */
+  private screen = '';
+  /** 表示中の通電（0〜1。停電で滑らかに暗くする） */
+  private shownPower = 1;
 
   constructor(private rand: () => number) {
     const sc = this.scene;
@@ -420,7 +428,9 @@ export class Diorama {
    */
   update(s: SimState, t: number, blind: Blind = false, clock = s.hour): void {
     this.showTank(true);
-    this.setClock(clock);
+    const fx = s.facility, bed = bedOf(s), running = pumpRunning(fx, bed.id);
+    const pw: Power = { on: powered(fx), pumpDown: fx.pumpDown.includes(bed.id), running };
+    this.setClock(clock, pw.on);
     const dg = diagnose(s), { key: wk, side } = dg.worst, ws = 1 - dg.worst.value;
     const hp = s.crop.health, g = s.crop.growth, du = this.dummy, tc = this.color;
     // 作物ごとの形と色（crops.json の look）。症状の色はこの健康な色から寄せる
@@ -432,12 +442,13 @@ export class Diorama {
     }
     const cs = this.stemColor.set(look.stem), cl = this.leafColor.set(look.leaf);
     const sick = Math.min(1, 1 - hp / 100 + ws * 0.4);
-    const wilt = wk === 'water' && side === 'low' ? ws : 0;
+    // 根の酸欠：根が茶色になり、苗がしおれる（溶存酸素は FACTORS の外なので diagnose に入らない）
+    const hyp = 1 - o2Fitness(bed);
+    const wilt = Math.max(wk === 'water' && side === 'low' ? ws : 0, hyp * 0.8);
     const small = wk === 'ec' && side === 'high' ? ws * 0.35 : 0;
     const stage = Math.floor(g * 4);
     if (stage !== this.stage) { this.stage = stage; this.popAt = t; }
     const pa = t - this.popAt, pop = pa < 0.6 ? 1 + 0.22 * Math.sin(pa * 16) * Math.exp(-pa * 5) : 1;
-    const bed = bedOf(s);
     this.shownWater += (bed.water - this.shownWater) * 0.15;
     const h = (this.shownWater / bed.capacity) * HM;
     this.water.scale.y = h;
@@ -462,12 +473,13 @@ export class Diorama {
       du.scale.set(1, Math.min(rootMax, 0.08 + gg * 0.85), 1);
       du.updateMatrix();
       this.roots.setMatrixAt(i, du.matrix);
-      this.roots.setColorAt(i, tc.copy(C_ROOT).lerp(C_ROOT_BAD, Math.min(1, ws * 1.3)));
+      this.roots.setColorAt(i, tc.copy(C_ROOT).lerp(C_ROOT_BAD, Math.min(1, Math.max(ws, hyp) * 1.3)));
     });
+    // エアレーションの泡：ポンプが止まると出なくなる
     for (let j = 0; j < 12; j++) {
       du.position.set(-1.7 + Math.sin(t * 3 + j) * 0.04, WB + ((t * 0.5 + j / 12) % 1) * h, 0.8);
       du.rotation.set(0, 0, 0);
-      du.scale.setScalar(0.6 + (j % 3) * 0.3);
+      du.scale.setScalar(running ? 0.6 + (j % 3) * 0.3 : 0);
       du.updateMatrix();
       this.bubbles.setMatrixAt(j, du.matrix);
     }
@@ -475,7 +487,7 @@ export class Diorama {
     this.roots.instanceMatrix.needsUpdate = true;
     this.roots.instanceColor!.needsUpdate = true;
     this.bubbles.instanceMatrix.needsUpdate = true;
-    this.panel(s, dg, t, blind, clock);
+    this.panel(s, dg, t, blind, clock, pw);
   }
 
   /**
@@ -488,26 +500,33 @@ export class Diorama {
       this.farm = new FarmRacks(this.scene);
       this.ledMats.push(this.farm.ledMaterial);
     }
-    this.farm.update(f, rack, slot);
-    this.setClock(clock);
-    this.panel(mon, diagnose(mon), t, blind, clock);
+    this.farm.update(f, rack, slot, t);
+    // 経営モードのポンプの運転ランプ（養液タンク）は棚のどれかが止まっていたら停止を示す。非常用電源があれば停電中も回る
+    const fx = f.facility, ups = f.equipment.ups > 0, down = fx.pumpDown.length > 0;
+    const pw: Power = { on: powered(fx), pumpDown: down, running: !down && (powered(fx) || ups) };
+    this.setClock(clock, pw.on);
+    this.panel(mon, diagnose(mon), t, blind, clock, pw);
   }
 
   /**
    * 昼夜：clock は経過時間 h（小数で滑らかに）。LED は sim と同じ時刻（LIGHT）で点き、高窓の空と部屋の光は朝夕に移り変わる。
-   * 夜も天井灯は点いている設定で暗くしすぎない（症状の色を見分けられるように）
+   * 夜も天井灯は点いている設定で暗くしすぎない（症状の色を見分けられるように）。
+   * 停電（on が false）は LED と天井灯が消え、高窓からの光だけになる（暗転。0.5秒ほどで移る）
    */
-  private setClock(clock: number) {
+  private setClock(clock: number, on = true) {
     const h = ((clock % 24) + 24) % 24;
+    this.shownPower += ((on ? 1 : 0) - this.shownPower) * 0.12;
+    const pw = this.shownPower;
     // 境目の手前 0.2h で移り変わり、整数の時刻では sim の isLit と一致する
-    const led = smooth(LIGHT.on - 0.2, LIGHT.on, h) * (1 - smooth(LIGHT.off - 0.2, LIGHT.off, h));
+    const led = smooth(LIGHT.on - 0.2, LIGHT.on, h) * (1 - smooth(LIGHT.off - 0.2, LIGHT.off, h)) * pw;
     const day = smooth(5, 7, h) * (1 - smooth(18, 20, h));
+    const room = 1 - (1 - pw) * (1 - (OUT_NIGHT + (OUT_DAY - OUT_NIGHT) * day));
     for (const m of this.ledMats) m.emissiveIntensity = 0.9 * led;
     this.ledLight.intensity = 1.2 * led;
     this.sky.color.copy(SKY_NIGHT).lerp(SKY_DAY, day).lerp(SKY_DUSK, 4 * day * (1 - day) * 0.7);
-    this.sun.intensity = 0.95 + 0.75 * day;
+    this.sun.intensity = (0.95 + 0.75 * day) * room;
     this.sun.color.copy(SUN_NIGHT).lerp(SUN_DAY, day);
-    this.hemi.intensity = 1.6 + 0.7 * day;
+    this.hemi.intensity = (1.6 + 0.7 * day) * room;
     this.hemi.color.copy(HEMI_NIGHT).lerp(HEMI_DAY, day);
   }
 
@@ -517,19 +536,31 @@ export class Diorama {
     if (this.farm) this.farm.visible = !v;
   }
 
-  /** 制御盤の状態ランプ・ポンプの運転ランプ・モニタ */
-  private panel(s: SimState, dg: Diagnosis, t: number, blind: Blind, clock: number) {
+  /**
+   * 制御盤の状態ランプ・ポンプの運転ランプ・モニタ。停電中は制御盤とモニタが消える。
+   * ポンプの運転ランプは運転中は緑でゆっくり明滅、止まったら赤で速く点滅、停電で回っていなければ消える
+   */
+  private panel(s: SimState, dg: Diagnosis, t: number, blind: Blind, clock: number, pw: Power) {
     const f = dg.fitness;
     this.lamps.forEach((m, i) => {
       const q = [f.ec, f.ph, f.water][i];
-      m.material.color.setHex(blind ? LAMP_OFF : q > 0.9 ? 0x5fe09a : q > 0.5 ? 0xf2c230 : 0xff6b6b);
+      m.material.color.setHex(blind || !pw.on ? LAMP_OFF : q > 0.9 ? 0x5fe09a : q > 0.5 ? 0xf2c230 : 0xff6b6b);
       m.material.emissive.copy(m.material.color);
     });
-    if (this.pumpLed) this.pumpLed.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(t * 4);
-    if (t - this.monitorAt > 0.4 || blind !== this.blind) {
+    if (this.pumpLed) {
+      const m = this.pumpLed.material;
+      if (pw.pumpDown) { m.color.setHex(PUMP_NG); m.emissiveIntensity = Math.sin(t * 9) > 0 ? 1.2 : 0.05; }
+      else if (pw.running) { m.color.setHex(PUMP_OK); m.emissiveIntensity = 0.5 + 0.5 * Math.sin(t * 4); }
+      else { m.color.setHex(LAMP_OFF); m.emissiveIntensity = 0; }
+      m.emissive.copy(m.color);
+    }
+    const alert = pw.pumpDown ? 'ポンプ停止：養液が循環していない' : null;
+    const screen = `${pw.on}:${blind}:${alert}`;
+    if (t - this.monitorAt > 0.4 || screen !== this.screen) {
       this.monitorAt = t;
-      this.blind = blind;
-      if (blind) this.monitor.drawBlind(blind); else this.monitor.draw(s, dg, clock);
+      this.screen = screen;
+      if (!pw.on) this.monitor.drawOff();
+      else if (blind) this.monitor.drawBlind(blind, alert); else this.monitor.draw(s, dg, clock, alert);
     }
   }
 }
