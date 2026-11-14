@@ -2,7 +2,7 @@
 
 import { execute, SUPPLIES, type Command, type DoseSupply } from './commands';
 import { applyFlows, ecOf, fill, findCompartment, type Compartment, type Flow, type Solution } from './compartment';
-import { CROPS, FACTORS, MEASURE, exchange, fitness, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
+import { CROPS, FACTORS, MEASURE, diurnal, exchange, fitness, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
 import { limiting, side } from './fitness';
 
 /** 設備の構成。水耕は栽培槽1区画で流れなし */
@@ -58,7 +58,7 @@ export interface SimState {
   /** 資材費の累計 円 */
   cost: number;
   /** 2時間ごとの記録（グラフ用） */
-  history: { ec: number; ph: number }[];
+  history: { ec: number; ph: number; water: number }[];
   log: SimEvent[];
   /** 観察メモの判定：適合度 0.7 未満が続いた時間、最後にメモを出した時刻、最後に適正（適合度 0.9 以上）だった時刻 */
   watch: Record<Factor, { low: number; last: number | null; okAt: number }>;
@@ -101,7 +101,7 @@ export function tick(s: SimState): void {
   if (s.result) return;
   const spec = cropSpec(s), bed = bedOf(s);
   applyFlows(s.compartments, s.flows);
-  exchange(s.crop, spec, bed);
+  exchange(s.crop, spec, bed, diurnal(s.hour));
   const f = fitness(spec, bed), lim = limiting(FACTORS, f);
   grow(s.crop, spec, lim.value);
   if (lim.value < 1) {
@@ -122,7 +122,7 @@ export function tick(s: SimState): void {
       s.log.push({ hour: s.hour, kind: 'advice', factor: k, side: sd, value: v, fit: f[k], driver: d?.supply ?? null, driverHour: d?.hour ?? null });
     }
   }
-  if (s.hour % 2 === 0) s.history.push({ ec: ecOf(bed), ph: bed.ph });
+  if (s.hour % 2 === 0) s.history.push({ ec: ecOf(bed), ph: bed.ph, water: bed.water });
   if (s.crop.health <= 0) finish(s, 'dead');
   else if (s.crop.growth >= 1) finish(s, 'harvest');
   else if (s.hour > spec.days * 48) finish(s, 'late');

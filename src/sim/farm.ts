@@ -4,7 +4,7 @@
 import businessJson from '../data/business.json';
 import { execute, type Command } from './commands';
 import { fill, findCompartment, type Compartment, type Solution } from './compartment';
-import { CROPS, FACTORS, MEASURE, exchange, fitness, gradeOf, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
+import { CROPS, FACTORS, MEASURE, diurnal, exchange, fitness, gradeOf, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
 import { limiting, side } from './fitness';
 
 // ---- データ（business.json） ----
@@ -320,6 +320,7 @@ const unitPrice = (b: Business, crop: string, ch: keyof Business['channels'], co
 
 /** 1時間進める */
 export function farmTick(f: FarmState, b: Business = BUSINESS): void {
+  const light = diurnal(f.hour);
   for (const r of f.racks) {
     const bed = findCompartment(f.compartments, r.id), n = b.slotsPerRack;
     let dWater = 0, dSalts = 0, dPh = 0;
@@ -332,7 +333,7 @@ export function farmTick(f: FarmState, b: Business = BUSINESS): void {
       const lim = limiting(FACTORS, fitness(spec, c));
       const sd = side(MEASURE[lim.key](c), spec.bands[lim.key]);
       if (!weak || lim.value < weak.value) weak = { value: lim.value, key: `${lim.key}.${sd}`, crop: t.crop.id };
-      exchange(t.crop, spec, c);
+      exchange(t.crop, spec, c, light);
       dWater += c.water - before.w;
       dSalts += c.solutes.salts - before.s;
       dPh += (c.ph - before.ph) / n;

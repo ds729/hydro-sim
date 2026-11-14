@@ -43,16 +43,16 @@ export class View {
     this.rig.setViewport(w, h, safes);
   }
 
-  /** 状態を反映して1フレーム描く。t は秒、blind はセンサの表示を伏せる理由 */
-  frame(s: SimState, t: number, blind: Blind = false): void {
-    this.diorama.update(s, t, blind);
+  /** 状態を反映して1フレーム描く。t は秒、blind はセンサの表示を伏せる理由、clock は部屋の時計（経過時間 h、小数可） */
+  frame(s: SimState, t: number, blind: Blind = false, clock = s.hour): void {
+    this.diorama.update(s, t, blind, clock);
     this.rig.update();
     this.renderer.render(this.diorama.scene, this.rig.camera);
   }
 
   /** 経営モード：棚を描く。rack・slot は選んでいるトレイ、mon は制御盤とモニタに出す見かけの栽培槽 */
-  frameFarm(f: FarmState, rack: number, slot: number, mon: SimState, t: number, blind: Blind): void {
-    this.diorama.updateFarm(f, rack, slot, mon, t, blind);
+  frameFarm(f: FarmState, rack: number, slot: number, mon: SimState, t: number, blind: Blind, clock = f.hour): void {
+    this.diorama.updateFarm(f, rack, slot, mon, t, blind, clock);
     this.rig.update();
     this.renderer.render(this.diorama.scene, this.rig.camera);
   }

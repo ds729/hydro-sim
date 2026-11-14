@@ -1,7 +1,7 @@
 // 壁掛けモニタ（CanvasTexture に養液の値とグラフを描く）
 
 import * as THREE from 'three';
-import { cropSpec, dayOf, type Diagnosis, type SimState } from '../sim';
+import { cropSpec, dayOf, isLit, type Diagnosis, type SimState } from '../sim';
 
 const W = 512, H = 278;
 const lamp = (q: number) => (q > 0.9 ? '#5fe09a' : q > 0.5 ? '#f2c230' : '#ff6b6b');
@@ -23,13 +23,17 @@ export class Monitor {
     this.texture.colorSpace = THREE.SRGBColorSpace;
   }
 
-  draw(s: SimState, d: Diagnosis): void {
+  /** clock は部屋の時計（経過時間 h。経営モードでは s.hour が播いてからの時間なので別に渡す） */
+  draw(s: SimState, d: Diagnosis, clock = s.hour): void {
     const x = this.ctx, days = cropSpec(s).days, dy = dayOf(s), { values: v, fitness: f } = d;
     x.fillStyle = '#0f2a2e';
     x.fillRect(0, 0, W, H);
     x.font = 'bold 22px sans-serif';
     x.fillStyle = '#8be3c4';
-    x.fillText('養液モニタ　Day ' + dy + (dy > days ? '（超過）' : ''), 16, 32);
+    x.fillText('養液モニタ　Day ' + dy + (dy > days ? '（超過）' : '') + `　${Math.floor(clock) % 24}時`, 16, 32);
+    x.font = '16px sans-serif';
+    x.fillStyle = isLit(clock) ? '#ffd2ec' : '#7d8aa8';
+    x.fillText(isLit(clock) ? '照明 ON' : '照明 OFF', 420, 32);
     const rows: [string, string, number][] = [
       ['EC', v.ec.toFixed(2), f.ec],
       ['pH', v.ph.toFixed(2), f.ph],

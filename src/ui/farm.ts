@@ -2,7 +2,7 @@
 // 帳簿（設備・月次損益・1トレイの見込み）は図鑑と同じ重ねた窓に出す。文言はここで作り、sim はイベントと数値だけを出す
 
 import {
-  BUSINESS, CROPS, applyFarmCommand, canBuy, contractById, contractsOf, createSim, farmDay, freshness, rackValues, reserved, totals, trayEstimate,
+  BUSINESS, CROPS, applyFarmCommand, canBuy, contractById, contractsOf, createSim, farmDay, freshness, isLit, rackValues, reserved, totals, trayEstimate,
   type Band, type Contract, type EquipmentId, type Factor, type FarmCommand, type FarmState, type Ledger, type ShortCause,
   type SimState, type Tray,
 } from '../sim';
@@ -105,7 +105,7 @@ export class FarmPanel {
     const f = this.f;
     if (this.rack >= f.racks.length) this.rack = 0;
     const d = farmDay(f), h = f.hour % 24;
-    $('fd').textContent = `Day ${d}（${WD[(d - 1) % 7]}）${h}時`;
+    $('fd').textContent = `Day ${d}（${WD[(d - 1) % 7]}）${h}時 ${isLit(f.hour) ? '💡' : '🌙'}`;
     $('fmo').textContent = `${f.ledger.month}か月目・現金`;
     $('fcash').textContent = yen(f.cash);
     this.racks();

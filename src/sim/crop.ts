@@ -2,6 +2,7 @@
 // 生き物（作物・v2 の魚・硝化菌）は「exchange で区画の物質をやり取りし、適合度で育つ・弱る」形に揃える
 
 import cropsJson from '../data/crops.json';
+import facilityJson from '../data/facility.json';
 import { ecOf, type Compartment } from './compartment';
 import { trapezoid, type Band } from './fitness';
 
@@ -70,9 +71,28 @@ export function fitness(spec: CropSpec, c: Compartment): Record<Factor, number> 
   };
 }
 
-/** 1時間分、区画から水と塩類を吸い、pH を動かす */
-export function exchange(crop: CropState, spec: CropSpec, c: Compartment): void {
-  const u = spec.uptake, act = u.activity[0] + u.activity[1] * crop.growth;
+/**
+ * 照明（LED）の点灯・消灯の時刻（時。hour % 24 で比べる）と、暗期の根の活動（吸水・吸収・pH の変化）の明期に対する割合。
+ * 1日の合計は変えない（作物の吸水量 waterLph は1日の平均）。成長は暗期も同じ速さ（日数は昼夜を含めた日数のため）
+ */
+export const LIGHT = (facilityJson as { light: { on: number; off: number; darkUptakeRatio: number } }).light;
+const LIT_HOURS = LIGHT.off - LIGHT.on;
+const LIT_MULT = 24 / (LIT_HOURS + (24 - LIT_HOURS) * LIGHT.darkUptakeRatio);
+
+/** その時刻（経過時間 h）に照明が点いているか */
+export function isLit(hour: number): boolean {
+  const h = ((hour % 24) + 24) % 24;
+  return h >= LIGHT.on && h < LIGHT.off;
+}
+
+/** その時刻の根の活動の倍率（明期は 1 より大きく、暗期は小さい。1日の平均が 1） */
+export function diurnal(hour: number): number {
+  return isLit(hour) ? LIT_MULT : LIT_MULT * LIGHT.darkUptakeRatio;
+}
+
+/** 1時間分、区画から水と塩類を吸い、pH を動かす。light は昼夜の倍率（diurnal） */
+export function exchange(crop: CropState, spec: CropSpec, c: Compartment, light = 1): void {
+  const u = spec.uptake, act = (u.activity[0] + u.activity[1] * crop.growth) * light;
   const et = u.waterLph * act, ec = ecOf(c);
   c.water = Math.max(0.05, c.water - et);
   c.solutes.salts = Math.max(0, c.solutes.salts - et * ec * u.saltRatio);

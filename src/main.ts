@@ -179,8 +179,10 @@ function loop(now: number) {
     if (dirty || sinceHud > 0.1) { hud.update(s); dirty = false; sinceHud = 0; }
     if (s.result && !resultShown) { resultShown = true; showResult(s.result, s.crop.id, restart); }
   } else if (mode === 'farm' && (dirty || sinceHud > 0.1)) { farm.update(); dirty = false; sinceHud = 0; }
-  if (mode === 'farm') view.frameFarm(farm.state, farm.rack, farm.slot, farm.sim ?? s, now / 1000, farm.blind);
-  else view.frame(quiz.sim ?? s, now / 1000, quiz.blind);
+  // 部屋の時計：進めている途中の端数（acc）も足して、朝夕の光を滑らかに変える。症状診断は昼の光で見せる
+  if (mode === 'farm') view.frameFarm(farm.state, farm.rack, farm.slot, farm.sim ?? s, now / 1000, farm.blind, farm.state.hour + (speed ? acc : 0));
+  else if (quiz.sim) view.frame(quiz.sim, now / 1000, quiz.blind, 12);
+  else view.frame(s, now / 1000, false, s.hour + (speed && !s.result ? acc : 0));
   frames++;
   if (now - fpsAt >= 1000) {
     fps = (frames * 1000) / (now - fpsAt);

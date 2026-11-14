@@ -47,6 +47,8 @@ export class FarmRacks {
   readonly group = new THREE.Group();
   private frames: THREE.InstancedMesh;
   private leds: THREE.InstancedMesh;
+  /** LED バーの発光（昼夜で点け消しする） */
+  get ledMaterial(): THREE.MeshStandardMaterial { return this.leds.material as THREE.MeshStandardMaterial; }
   private trays: THREE.InstancedMesh;
   /** トレイの培地（播いたトレイだけ見せる） */
   private mats: THREE.InstancedMesh;

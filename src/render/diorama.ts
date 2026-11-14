@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { bedOf, cropSpec, diagnose, mulberry32, type CropSpec, type Diagnosis, type FarmState, type SimState } from '../sim';
+import { LIGHT, bedOf, cropSpec, diagnose, mulberry32, type CropSpec, type Diagnosis, type FarmState, type SimState } from '../sim';
 import { bakedShadow, boxSet, Builder, LED, mat, SLAB, type BoxSpec } from './build';
 import { loadModel } from './models';
 import { Monitor, type Blind } from './monitor';
@@ -49,6 +49,15 @@ function mergeTori(rings: readonly (readonly [number, number, number])[], r: num
 const LAMP_OFF = 0x3a4048;
 const C_ROOT = new THREE.Color(0xf6f2e6), C_ROOT_BAD = new THREE.Color(0x7d5632);
 
+/** 高窓の空の色（昼・夕・夜） */
+const SKY_DAY = new THREE.Color(0xc4e4f2), SKY_DUSK = new THREE.Color(0xf0b487), SKY_NIGHT = new THREE.Color(0x27325a);
+/** 主光源と環境光の色（昼・夜）。夜も天井灯は点いている設定で、症状の色が見分けられる明るさを残す */
+const SUN_DAY = new THREE.Color(0xfff0dc), SUN_NIGHT = new THREE.Color(0xc8d4ff);
+const HEMI_DAY = new THREE.Color(0xfff6ea), HEMI_NIGHT = new THREE.Color(0xdde4ff);
+/** 高窓の中心 x（奥の壁の柱の間。補助ラックの上） */
+const WINDOWS_X = [-3.425, -2.275, 2.325, 3.475], WINDOW_Y = 3.55;
+const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
 interface Seedling { x: number; z: number; delay: number; size: number; phase: number }
 type Lamp = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
 
@@ -56,6 +65,11 @@ export class Diorama {
   readonly scene = new THREE.Scene();
   /** 主光源（リアルタイムの影を落とす。画質設定で影を切る） */
   readonly sun: THREE.DirectionalLight;
+  private hemi: THREE.HemisphereLight;
+  /** 昼夜：LED バーの発光（栽培槽・補助ラック・経営の棚）と LED の照り返し、高窓の空 */
+  private ledMats: THREE.MeshStandardMaterial[] = [];
+  private ledLight!: THREE.PointLight;
+  private sky!: THREE.MeshBasicMaterial;
   private monitor = new Monitor();
   /** 状態ランプとポンプの運転ランプ（.glb の読み込み後に入る） */
   private lamps: Lamp[] = [];
@@ -95,7 +109,7 @@ export class Diorama {
   constructor(private rand: () => number) {
     const sc = this.scene;
     // 光の強度は物理単位（π で旧来の 1 に相当）。上向きの面がほぼ指定色になり、影の側は 6 割ほどの明るさに残る（影は薄く）
-    sc.add(new THREE.HemisphereLight(0xfff6ea, 0xb4bccf, 2.3));
+    sc.add((this.hemi = new THREE.HemisphereLight(0xfff6ea, 0xb4bccf, 2.3)));
     const sun = (this.sun = new THREE.DirectionalLight(0xfff0dc, 1.7));
     // 左の面（+z）を明るく、右の面（+x）を暗くして立体感を出す（参照画像の光の向き）。仰角は 49° のまま（上向きの面の明るさを変えない）
     sun.position.set(1, 9.5, 8.2);
@@ -216,6 +230,22 @@ export class Diorama {
     for (const [x, z, w, d] of [[0.6, -0.7, 4.8, 0.08], [0.6, 2.3, 4.8, 0.08], [-1.8, 0.8, 0.08, 3], [3, 0.8, 0.08, 3]]) {
       boxes.push([w, 0.012, d, 0xf2c230, x, 0.006, z]);
     }
+    // 高窓（奥の壁の柱の間）。空の色で昼夜を見せる（setClock）。枠は箱の並びに、ガラスは InstancedMesh 1つ
+    for (const x of WINDOWS_X) {
+      boxes.push(
+        [0.98, 0.06, 0.07, 0xeee9df, x, WINDOW_Y + 0.455, -3.37], [0.98, 0.06, 0.07, 0xeee9df, x, WINDOW_Y - 0.455, -3.37],
+        [0.06, 0.97, 0.07, 0xeee9df, x - 0.46, WINDOW_Y, -3.37], [0.06, 0.97, 0.07, 0xeee9df, x + 0.46, WINDOW_Y, -3.37],
+        [0.035, 0.85, 0.04, 0xeee9df, x, WINDOW_Y, -3.38], [1.04, 0.05, 0.14, 0xe2dccf, x, WINDOW_Y - 0.5, -3.33],
+      );
+    }
+    this.sky = new THREE.MeshBasicMaterial({ color: SKY_DAY, toneMapped: false });
+    const glass = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.86, 0.85), this.sky, WINDOWS_X.length), du = new THREE.Object3D();
+    WINDOWS_X.forEach((x, i) => {
+      du.position.set(x, WINDOW_Y, -3.395);
+      du.updateMatrix();
+      glass.setMatrixAt(i, du.matrix);
+    });
+    b.parent.add(glass);
     boxSet(b.parent, boxes);
   }
 
@@ -227,6 +257,8 @@ export class Diorama {
   private buildRacks(b: Builder) {
     const racks = [[-2.4, -2.8], [3.2, -2.8]];
     loadModel('aux_rack').then(m => racks.forEach(([x, z], i) => {
+      // LED バーの発光（clone は材質を共有するので1台目から取る）
+      if (!i) m.getObjectByName('rack_led')?.traverse(o => { if (o instanceof THREE.Mesh) this.ledMats.push(o.material); });
       const o = i ? m.clone() : m;
       o.position.set(x, 0, z);
       this.scene.add(o);
@@ -316,9 +348,9 @@ export class Diorama {
     // トレイの受け（ガラスの内側の長辺に4つ）。上面がトレイの底になる高さ
     boxSet(tg, [-1.3, 1.3].flatMap(x => [-1, 1].map((z): BoxSpec => [0.16, 0.04, 0.05, 0xa9b3bb, x, WB + STOP * HM - 0.02, z * (D / 2 - 0.03)])));
     // LED バーは細く（寄りで苗を隠す幅を減らす）
-    for (const z of [-0.55, 0.55]) b.box(W - 0.4, 0.08, 0.14, 0xffffff, 0, 2.85, z, LED);
+    for (const z of [-0.55, 0.55]) this.ledMats.push(b.box(W - 0.4, 0.08, 0.14, 0xffffff, 0, 2.85, z, LED).material);
     // LED の照り返し（トレイと苗をほんのり桃色に）。decay 1 で距離に対して緩やかに減衰させる
-    const pl = new THREE.PointLight(0xffc4ec, 1.2, 7, 1);
+    const pl = (this.ledLight = new THREE.PointLight(0xffc4ec, 1.2, 7, 1));
     pl.position.set(0, 2.65, 0);
     tg.add(pl);
     // EC・pH センサのプローブ（槽の枠に固定。トレイの穴を通して液量が少ないときも水に届く長さ）
@@ -386,8 +418,9 @@ export class Diorama {
    * 状態を見た目に反映する。t は秒。最も悪い要因が苗の色と形を決める。
    * blind：センサの表示（制御盤の状態ランプ・モニタ）を伏せる（症状診断モードで見た目だけから当てさせる、経営モードで連続測定センサがない）
    */
-  update(s: SimState, t: number, blind: Blind = false): void {
+  update(s: SimState, t: number, blind: Blind = false, clock = s.hour): void {
     this.showTank(true);
+    this.setClock(clock);
     const dg = diagnose(s), { key: wk, side } = dg.worst, ws = 1 - dg.worst.value;
     const hp = s.crop.health, g = s.crop.growth, du = this.dummy, tc = this.color;
     // 作物ごとの形と色（crops.json の look）。症状の色はこの健康な色から寄せる
@@ -442,17 +475,40 @@ export class Diorama {
     this.roots.instanceMatrix.needsUpdate = true;
     this.roots.instanceColor!.needsUpdate = true;
     this.bubbles.instanceMatrix.needsUpdate = true;
-    this.panel(s, dg, t, blind);
+    this.panel(s, dg, t, blind, clock);
   }
 
   /**
    * 経営モード：栽培槽の代わりに棚を出す。rack・slot は選んでいるトレイ（枠で示す）。
    * 制御盤のランプとモニタは選んだトレイの見かけの栽培槽 mon で描く（連続測定センサがなければ blind で伏せる）
    */
-  updateFarm(f: FarmState, rack: number, slot: number, mon: SimState, t: number, blind: Blind): void {
+  updateFarm(f: FarmState, rack: number, slot: number, mon: SimState, t: number, blind: Blind, clock = f.hour): void {
     this.showTank(false);
-    (this.farm ??= new FarmRacks(this.scene)).update(f, rack, slot);
-    this.panel(mon, diagnose(mon), t, blind);
+    if (!this.farm) {
+      this.farm = new FarmRacks(this.scene);
+      this.ledMats.push(this.farm.ledMaterial);
+    }
+    this.farm.update(f, rack, slot);
+    this.setClock(clock);
+    this.panel(mon, diagnose(mon), t, blind, clock);
+  }
+
+  /**
+   * 昼夜：clock は経過時間 h（小数で滑らかに）。LED は sim と同じ時刻（LIGHT）で点き、高窓の空と部屋の光は朝夕に移り変わる。
+   * 夜も天井灯は点いている設定で暗くしすぎない（症状の色を見分けられるように）
+   */
+  private setClock(clock: number) {
+    const h = ((clock % 24) + 24) % 24;
+    // 境目の手前 0.2h で移り変わり、整数の時刻では sim の isLit と一致する
+    const led = smooth(LIGHT.on - 0.2, LIGHT.on, h) * (1 - smooth(LIGHT.off - 0.2, LIGHT.off, h));
+    const day = smooth(5, 7, h) * (1 - smooth(18, 20, h));
+    for (const m of this.ledMats) m.emissiveIntensity = 0.9 * led;
+    this.ledLight.intensity = 1.2 * led;
+    this.sky.color.copy(SKY_NIGHT).lerp(SKY_DAY, day).lerp(SKY_DUSK, 4 * day * (1 - day) * 0.7);
+    this.sun.intensity = 0.95 + 0.75 * day;
+    this.sun.color.copy(SUN_NIGHT).lerp(SUN_DAY, day);
+    this.hemi.intensity = 1.6 + 0.7 * day;
+    this.hemi.color.copy(HEMI_NIGHT).lerp(HEMI_DAY, day);
   }
 
   private showTank(v: boolean) {
@@ -462,7 +518,7 @@ export class Diorama {
   }
 
   /** 制御盤の状態ランプ・ポンプの運転ランプ・モニタ */
-  private panel(s: SimState, dg: Diagnosis, t: number, blind: Blind) {
+  private panel(s: SimState, dg: Diagnosis, t: number, blind: Blind, clock: number) {
     const f = dg.fitness;
     this.lamps.forEach((m, i) => {
       const q = [f.ec, f.ph, f.water][i];
@@ -473,7 +529,7 @@ export class Diorama {
     if (t - this.monitorAt > 0.4 || blind !== this.blind) {
       this.monitorAt = t;
       this.blind = blind;
-      if (blind) this.monitor.drawBlind(blind); else this.monitor.draw(s, dg);
+      if (blind) this.monitor.drawBlind(blind); else this.monitor.draw(s, dg, clock);
     }
   }
 }

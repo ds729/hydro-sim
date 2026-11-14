@@ -1,0 +1,7 @@
+{
+  "light": {
+    "on": 6,
+    "off": 22,
+    "darkUptakeRatio": 0.15
+  }
+}
