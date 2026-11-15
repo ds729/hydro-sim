@@ -1,0 +1,86 @@
+[
+  {
+    "id": "first",
+    "title": "はじめての収穫",
+    "brief": "ラディッシュを1トレイ育てて収穫する。案内に沿って、肥料・pH・液量を見ながら整えよう。",
+    "hint": "HUD のゲージが緑の帯に入っていれば適正。外れたら道具バーで戻す。",
+    "mode": "grow",
+    "crop": "radish",
+    "guide": true,
+    "goal": {}
+  },
+  {
+    "id": "thin",
+    "title": "薄すぎる養液",
+    "brief": "水で薄めすぎた養液（EC 0.3）から始まる。肥料で EC を適正帯まで上げて、等級 A 以上で収穫する。",
+    "hint": "EC が低いと葉が黄緑になる。肥料を何回か続けて入れ、EC が 0.8 を超えたら様子を見る。",
+    "mode": "grow",
+    "crop": "broccoli",
+    "initial": { "ec": 0.3 },
+    "goal": { "grade": "A" }
+  },
+  {
+    "id": "alkaline",
+    "title": "pH の高い水",
+    "brief": "pH 7.3 の水で作った養液から始まる。ひまわりを等級 A 以上で収穫する。",
+    "hint": "pH が高いと鉄などが吸えず、葉が白っぽい黄色になる。pH ダウンで 5.5〜6.5 に下げる。",
+    "mode": "grow",
+    "crop": "sunflower",
+    "initial": { "ph": 7.3 },
+    "goal": { "grade": "A" }
+  },
+  {
+    "id": "thrifty",
+    "title": "資材を節約",
+    "brief": "養液と調整剤の費用を 65 円以内に抑えて、ラディッシュを等級 S で収穫する。",
+    "hint": "pH ダウンは1回 20 円。真ん中に合わせ直すと回数が増える。帯（5.5〜6.5）の中なら品質は落ちないので、6.5 に近づいてから入れる。",
+    "mode": "grow",
+    "crop": "radish",
+    "goal": { "grade": "S", "maxSupplies": 65 }
+  },
+  {
+    "id": "pump",
+    "title": "ポンプが止まった",
+    "brief": "豆苗を育てている途中で、ポンプの詰まりと停電が起きる。根を酸欠にさせず、等級 A 以上で収穫する。",
+    "hint": "ポンプが止まると養液に酸素が入らず、根が茶色になる。警報の「直す」でポンプを動かす。停電は待つしかない。",
+    "mode": "grow",
+    "crop": "pea",
+    "schedule": [
+      { "hour": 50, "kind": "pumpStop" },
+      { "hour": 130, "kind": "outage", "hours": 6 },
+      { "hour": 200, "kind": "pumpStop" }
+    ],
+    "goal": { "grade": "A" }
+  },
+  {
+    "id": "diagnose",
+    "title": "症状を見分ける",
+    "brief": "症状診断の5問に全問正解する。センサは伏せてある。葉と根の色と形だけで原因を当てる。",
+    "hint": "黄緑＝肥料不足、茶色で小さい＝EC 過多、白っぽい黄色＝pH 高、紫がかる＝pH 低、しおれ＝液量不足。",
+    "mode": "quiz",
+    "goal": { "minScore": 5 }
+  },
+  {
+    "id": "contract",
+    "title": "契約を守る1か月",
+    "brief": "経営モードで30日回す。4件の契約を欠品なしで納め、黒字にする。",
+    "hint": "納品日から育つ日数を引いた日に播く。ひまわりは EC の適正帯が低いので、棚を分けると楽。",
+    "mode": "farm",
+    "goal": { "days": 30, "maxMisses": 0, "minProfit": 0 }
+  },
+  {
+    "id": "trouble",
+    "title": "トラブル続きの1か月",
+    "brief": "停電とポンプの詰まりが続く1か月。欠品を2回以内に抑えて、黒字にする。",
+    "hint": "ポンプはすぐ直す。予備ポンプや非常用電源を買うと手間が減るが、費用と見合うか考える。",
+    "mode": "farm",
+    "schedule": [
+      { "hour": 100, "kind": "pumpStop" },
+      { "hour": 250, "kind": "outage", "hours": 8 },
+      { "hour": 400, "kind": "pumpStop" },
+      { "hour": 470, "kind": "outage", "hours": 6 },
+      { "hour": 560, "kind": "pumpStop" }
+    ],
+    "goal": { "days": 30, "maxMisses": 2, "minProfit": 0 }
+  }
+]

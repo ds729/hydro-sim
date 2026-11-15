@@ -23,9 +23,16 @@ export interface FacilitySpec {
 
 export const FACILITY = facilityJson as unknown as FacilitySpec;
 
+/** 予定のイベント（課題で決まった時刻に起こす。hour は経過時間）。pumpStop の target を省くと最初のポンプ */
+export type ScheduledEvent =
+  | { hour: number; kind: 'outage'; hours: number }
+  | { hour: number; kind: 'pumpStop'; target?: string };
+
 export interface FacilityState {
-  /** 停電・ポンプの停止を起こすか（栽培モードは既定で起こさない） */
+  /** 停電・ポンプの停止を抽選で起こすか（栽培モードは既定で起こさない） */
   events: boolean;
+  /** 予定のイベント（events によらず起きる。起きたものから消す） */
+  schedule: ScheduledEvent[];
   /** 停電の残り時間 h（0 なら通電） */
   outage: number;
   /** 止まっているポンプ（区画の id） */
@@ -44,8 +51,8 @@ export type FacilityEvent =
   /** 観察メモ：根が酸欠（溶存酸素の適合度 0.7 未満が3時間）。pump はそのときポンプが回っていたか */
   | { kind: 'hypoxia'; target: string; o2: number; fit: number; pump: boolean };
 
-export function createFacility(events = false): FacilityState {
-  return { events, outage: 0, pumpDown: [], watch: {} };
+export function createFacility(events = false, schedule: readonly ScheduledEvent[] = []): FacilityState {
+  return { events, schedule: schedule.map(e => ({ ...e })), outage: 0, pumpDown: [], watch: {} };
 }
 
 export const powered = (fs: FacilityState) => fs.outage <= 0;
@@ -54,19 +61,23 @@ export const powered = (fs: FacilityState) => fs.outage <= 0;
 export const pumpRunning = (fs: FacilityState, id: string, backup = false) => !fs.pumpDown.includes(id) && (powered(fs) || backup);
 
 /**
- * 1時間の始めに停電・ポンプの停止を抽選する（events のときだけ。乱数を引くのもそのときだけ）。
+ * 1時間の始めに、予定のイベントを起こし、停電・ポンプの停止を抽選する（抽選は events のときだけ。乱数を引くのもそのときだけ）。
  * 停電中は新しい停電を起こさない。起きたことを返す（記録は呼び出し側）
  */
-export function rollEvents(fs: FacilityState, rng: { rng: number }, pumps: readonly string[], spec: FacilitySpec = FACILITY): FacilityEvent[] {
-  if (!fs.events) return [];
+export function rollEvents(fs: FacilityState, now: { rng: number; hour: number }, pumps: readonly string[], spec: FacilitySpec = FACILITY): FacilityEvent[] {
   const out: FacilityEvent[] = [];
-  if (fs.outage <= 0 && nextRandom(rng) < 1 / (spec.outage.meanIntervalDays * 24)) {
+  for (const e of fs.schedule.filter(e => e.hour <= now.hour)) {
+    out.push(e.kind === 'outage' ? startOutage(fs, e.hours) : stopPump(fs, e.target ?? pumps[0]));
+  }
+  fs.schedule = fs.schedule.filter(e => e.hour > now.hour);
+  if (!fs.events) return out;
+  if (fs.outage <= 0 && nextRandom(now) < 1 / (spec.outage.meanIntervalDays * 24)) {
     const [lo, hi] = spec.outage.hours;
-    out.push(startOutage(fs, lo + Math.floor(nextRandom(rng) * (hi - lo + 1))));
+    out.push(startOutage(fs, lo + Math.floor(nextRandom(now) * (hi - lo + 1))));
   }
   for (const id of pumps) {
     if (fs.pumpDown.includes(id)) continue;
-    if (nextRandom(rng) < 1 / (spec.pump.meanIntervalDays * 24)) out.push(stopPump(fs, id));
+    if (nextRandom(now) < 1 / (spec.pump.meanIntervalDays * 24)) out.push(stopPump(fs, id));
   }
   return out;
 }

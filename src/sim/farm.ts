@@ -6,7 +6,7 @@ import { execute, type Command } from './commands';
 import { fill, findCompartment, type Compartment, type Solution } from './compartment';
 import { CROPS, FACTORS, MEASURE, diurnal, exchange, isLit, fitness, gradeOf, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
 import { limiting, side } from './fitness';
-import { aerate, createFacility, endHour, fixPump, o2Fitness, powered, pumpRunning, rollEvents, watchHypoxia, type FacilityEvent, type FacilityState } from './facility';
+import { aerate, createFacility, endHour, fixPump, o2Fitness, powered, pumpRunning, rollEvents, watchHypoxia, type FacilityEvent, type FacilityState, type ScheduledEvent } from './facility';
 
 // ---- データ（business.json） ----
 
@@ -253,10 +253,10 @@ function addRack(f: FarmState, b: Business): void {
 }
 
 /** events：停電・ポンプの停止を起こす（画面の経営モードは起こす。sim の既定は起こさない＝テストの数値を変えない） */
-export function createFarm(opts: { seed?: number; business?: Business; events?: boolean } = {}): FarmState {
+export function createFarm(opts: { seed?: number; business?: Business; events?: boolean; schedule?: readonly ScheduledEvent[] } = {}): FarmState {
   const b = opts.business ?? BUSINESS;
   const f: FarmState = {
-    hour: 0, rng: (opts.seed ?? 1) >>> 0, cash: b.startCash, compartments: [], facility: createFacility(opts.events ?? false), racks: [], stock: [],
+    hour: 0, rng: (opts.seed ?? 1) >>> 0, cash: b.startCash, compartments: [], facility: createFacility(opts.events ?? false, opts.schedule), racks: [], stock: [],
     equipment: { rack: 0, autoWater: 0, autoPh: 0, probe: 0, fridge: 0, led: 0, ups: 0, sparePump: 0 }, assets: [],
     contracts: Object.fromEntries(b.contracts.map(c => [c.id, { misses: 0, lost: false }])), reputation: 0, offers: {}, watch: {},
     ledger: newLedger(1), months: [], readings: {}, readAt: 0, log: [],

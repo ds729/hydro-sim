@@ -1,16 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { applyCommand, bedOf, BUSINESS, createSim, CROPS, cropSpec, diagnose, ecOf, mulberry32, tick, trayCost, trayEstimate, type Command, type SimState } from './index';
+import { keepInBand, runToEnd } from './testplay';
 
 const fert: Command = { type: 'dose', target: 'bed', supply: 'fertilizer', amount: 10 };
 const water: Command = { type: 'dose', target: 'bed', supply: 'water', amount: 0.2 };
 const phDown: Command = { type: 'dose', target: 'bed', supply: 'phDown', amount: 1 };
 const phUp: Command = { type: 'dose', target: 'bed', supply: 'phUp', amount: 1 };
-
-/** 終わるまで進める。each は毎 tick の前に呼ぶ */
-function runToEnd(s: SimState, each: (s: SimState) => void = () => {}) {
-  for (let i = 0; i < 10000 && !s.result; i++) { each(s); tick(s); }
-  return s.result!;
-}
 
 /** 適正帯の中ほどに保つ簡単な制御（自動制御ルールモードと同じくコマンドだけで操作する） */
 function keepOptimal(s: SimState) {
@@ -18,17 +13,6 @@ function keepOptimal(s: SimState) {
   if (b.ph > 6.3) applyCommand(s, phDown);
   if (b.water < 1.6 || (ecOf(b) > 1.4 && b.water < 2)) applyCommand(s, water);
   if (ecOf(b) < 1.0) applyCommand(s, fert);
-}
-
-/** 作物の適正帯から作る制御：各要因を適正帯の内側 2 割より中に保つ（どの作物でも同じ規則） */
-function keepInBand(s: SimState) {
-  const b = bedOf(s), { ec, ph, water: w } = cropSpec(s).bands;
-  const inner = (band: readonly number[]) => [band[1] + (band[2] - band[1]) * 0.2, band[2] - (band[2] - band[1]) * 0.2];
-  const [ecLo, ecHi] = inner(ec), [phLo, phHi] = inner(ph), [wLo, wHi] = inner(w);
-  if (b.ph > phHi) applyCommand(s, phDown);
-  if (b.ph < phLo) applyCommand(s, phUp);
-  if (b.water < wLo || (ecOf(b) > ecHi && b.water < wHi)) applyCommand(s, water);
-  if (ecOf(b) < ecLo) applyCommand(s, fert);
 }
 
 describe('作物（Phase 3）', () => {

@@ -5,7 +5,7 @@ import { applyFlows, ecOf, fill, findCompartment, type Compartment, type Flow, t
 import { CROPS, FACTORS, MEASURE, diurnal, exchange, isLit, fitness, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
 import { limiting, side } from './fitness';
 import { BUSINESS, trayCost } from './farm';
-import { aerate, createFacility, endHour, fixPump, o2Fitness, powered, pumpRunning, rollEvents, watchHypoxia, type FacilityEvent, type FacilityState } from './facility';
+import { aerate, createFacility, endHour, fixPump, o2Fitness, powered, pumpRunning, rollEvents, watchHypoxia, type FacilityEvent, type FacilityState, type ScheduledEvent } from './facility';
 
 /** 設備の構成。水耕は栽培槽1区画で流れなし */
 export interface Setup {
@@ -82,8 +82,8 @@ const WATCH_LOW = 0.7, WATCH_HOURS = 3, WATCH_INTERVAL = 24;
 /** この適合度以上なら「適正」とみなす（観察メモの原因は、最後に適正だった時刻より後の操作から探す） */
 const WATCH_OK = 0.9;
 
-/** events：停電・ポンプの停止を起こす（既定は起こさない） */
-export function createSim(opts: { crop?: string; seed?: number; setup?: Setup; events?: boolean } = {}): SimState {
+/** events：停電・ポンプの停止を抽選で起こす（既定は起こさない）。schedule：決まった時刻に起こすイベント（課題用） */
+export function createSim(opts: { crop?: string; seed?: number; setup?: Setup; events?: boolean; schedule?: readonly ScheduledEvent[] } = {}): SimState {
   const setup = opts.setup ?? HYDROPONIC;
   const compartments = setup.compartments.map(d => {
     const c: Compartment = { id: d.id, capacity: d.capacity, water: 0, solutes: { salts: 0 }, ph: 7, o2: 1 };
@@ -94,7 +94,7 @@ export function createSim(opts: { crop?: string; seed?: number; setup?: Setup; e
   if (!CROPS[id]) throw new Error(`作物 ${id} がありません`);
   return {
     setup, hour: 0, rng: (opts.seed ?? 1) >>> 0, compartments, flows: setup.flows.map(f => ({ ...f })),
-    facility: createFacility(opts.events ?? false),
+    facility: createFacility(opts.events ?? false, opts.schedule),
     crop: { id, compartment: setup.bed, growth: 0, health: 100, qualitySum: 0 },
     cost: 0, history: [], log: [{ hour: 0, kind: 'start', crop: id }],
     watch: { ec: { low: 0, last: null, okAt: 0 }, ph: { low: 0, last: null, okAt: 0 }, water: { low: 0, last: null, okAt: 0 } },

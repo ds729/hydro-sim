@@ -1,43 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import {
   BUSINESS, CROPS, applyFarmCommand, canBuy, createFarm, createSim, farmTick, contractsOf, rackValues, reserved, tick, totals, trayEstimate,
-  type Factor, type FarmEvent, type FarmState, type Ledger, type ShortCause,
+  type FarmEvent, type FarmState, type Ledger, type ShortCause,
 } from './index';
+import { farmKeepInBand as keepInBand, farmRun as run, harvestRipe } from './testplay';
 
 const R = 'rack1';
-
-/** 棚に植わっている作物の適正帯の重なりの、内側 2 割より中に保つ（栽培モードの keepInBand と同じ規則） */
-function keepInBand(f: FarmState) {
-  for (const r of f.racks) {
-    const crops = r.slots.filter(t => t && t.crop.health > 0).map(t => CROPS[t!.crop.id]);
-    if (!crops.length) continue;
-    const v = rackValues(f, r.id);
-    const band = (k: Factor) => {
-      const lo = Math.max(...crops.map(c => c.bands[k][1])), hi = Math.min(...crops.map(c => c.bands[k][2]));
-      return [lo + (hi - lo) * 0.2, hi - (hi - lo) * 0.2];
-    };
-    const [ecLo, ecHi] = band('ec'), [phLo, phHi] = band('ph'), [wLo, wHi] = band('water');
-    const dose = (supply: 'fertilizer' | 'water' | 'phDown' | 'phUp', amount: number) =>
-      applyFarmCommand(f, { type: 'dose', target: r.id, supply, amount });
-    if (v.ph > phHi) dose('phDown', 1);
-    if (v.ph < phLo) dose('phUp', 1);
-    if (v.water < wLo || (v.ec > ecHi && v.water < wHi)) dose('water', 0.2);
-    if (v.ec < ecLo) dose('fertilizer', 10);
-  }
-}
-
-/** 育ち終えたトレイを収穫し、枯れたトレイを片付ける */
-function harvestRipe(f: FarmState) {
-  for (const r of f.racks) r.slots.forEach((t, i) => {
-    if (!t) return;
-    if (t.crop.health <= 0) applyFarmCommand(f, { type: 'clear', rack: r.id, slot: i });
-    else if (t.ripeAt !== null) applyFarmCommand(f, { type: 'harvest', rack: r.id, slot: i });
-  });
-}
-
-const run = (f: FarmState, hours: number, each: (f: FarmState) => void = () => {}) => {
-  for (let i = 0; i < hours; i++) { each(f); farmTick(f); }
-};
 
 /** 現金 ＝ 元手 ＋ 売上 − 費用（減価償却を除く） − 設備の購入 */
 function cashCheck(f: FarmState) {
