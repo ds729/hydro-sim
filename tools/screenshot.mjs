@@ -1,7 +1,7 @@
 // headless Chrome + CDP でカメラ・画面幅ごとのスクリーンショットを撮る
 // node tools/screenshot.mjs <出力先> [サイズ JSON] [カメラ JSON] [撮影前に評価する JS]
 // 例: node tools/screenshot.mjs out '[[1280,800,1,false],[390,844,2,true]]' '["全景","寄り"]'
-// 環境変数：URL（既定は開発サーバー）、SCHEME（light / dark。配色を固定する）
+// 環境変数：URL（既定は開発サーバー）、SCHEME（light / dark。配色を固定する）、GUIDE（1 なら初回の案内を出す）
 import { spawn } from 'node:child_process';
 import { writeFileSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,6 +29,8 @@ ws.onmessage = e => { const m = JSON.parse(e.data); if (m.id && pend[m.id]) { pe
 const send = (method, params = {}) => new Promise(r => { const i = ++id; pend[i] = r; ws.send(JSON.stringify({ id: i, method, params })); });
 const ev = async expr => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true })).result?.result?.value;
 await send('Runtime.enable'); await send('Page.enable');
+// 初回の案内（課題「はじめての収穫」）を出さない。案内を撮るときは環境変数 GUIDE=1
+if (!process.env.GUIDE) await send('Page.addScriptToEvaluateOnNewDocument', { source: "try{localStorage.setItem('hydro-sim.guided','1')}catch(e){}" });
 // 配色（light / dark）を固定する。未指定なら OS の設定に従う
 if (process.env.SCHEME) await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: process.env.SCHEME }] });
 

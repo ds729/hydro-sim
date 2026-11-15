@@ -17,6 +17,8 @@ export class QuizPanel {
   private quiz: Quiz | null = null;
   private current: SimState | null = null;
   private buttons = new Map<string, HTMLButtonElement>();
+  /** 結果の「もう一周」で呼ぶ（課題中は課題をはじめから。省くと新しい問題で1周） */
+  again: (() => void) | null = null;
 
   constructor(private onExit: () => void) {
     for (const c of QUIZ_CAUSES) {
@@ -39,6 +41,12 @@ export class QuizPanel {
   /** 1周を始める */
   start(seed: number): void {
     this.quiz = createQuiz(seed);
+    this.show();
+  }
+
+  /** 作ってある1周を始める（課題の出題） */
+  load(z: Quiz): void {
+    this.quiz = z;
     this.show();
   }
 
@@ -102,7 +110,7 @@ export class QuizPanel {
     }).join('');
     $('qz').innerHTML = `<p class="qq"><b>${n} 問中 ${sc} 問正解</b>${sc === n ? '　全問正解！' : ''}</p><ul class="ql">${rows}</ul>`
       + '<div class="g"><button id="qg">もう一周</button><button id="qx">栽培に戻る</button></div>';
-    $('qg').onclick = () => this.start(Date.now());
+    $('qg').onclick = () => (this.again ? this.again() : this.start(Date.now()));
     $('qx').onclick = () => this.onExit();
     for (const b of this.buttons.values()) {
       b.disabled = true;

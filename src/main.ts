@@ -1,7 +1,10 @@
 // 画面の組み立てとメインループ。sim は固定タイムステップ（1 tick ＝ 1時間）で進め、描画は毎フレーム
 
 import './ui/style.css';
-import { applyCommand, BUSINESS, createFarm, createSim, CROPS, cropSpec, farmTick, startOutage, stopPump, tick, type Command, type FarmCommand, type SimState } from './sim';
+import {
+  applyCommand, BUSINESS, createFarm, createSim, CROPS, cropSpec, farmTick, judgeScenario, scenarioById, startOutage, startScenario, stopPump, tick,
+  type Command, type FarmCommand, type FarmState, type ScenarioRun, type SimState, type Verdict,
+} from './sim';
 import { PRESETS, type PresetName } from './render/camera';
 import { modelStatus } from './render/models';
 import { View, type Quality } from './render/view';
@@ -14,6 +17,8 @@ import { FarmPanel } from './ui/farm';
 import { markSeen, openZukan } from './ui/zukan';
 import { alarmed, alarmHtml } from './ui/alarm';
 import { Sound, soundsOf } from './ui/sound';
+import { goalHtml, noRecords, openTasks, recordTask, showVerdict, verdictHtml } from './ui/tasks';
+import { Guide } from './ui/guide';
 
 const $ = (id: string) => document.getElementById(id)!;
 const app = $('app'), menu = $('mb');
@@ -60,6 +65,7 @@ function send(c: Command) {
 
 /** モードを切り替える（栽培・症状診断・経営）。seed は診断の問題の乱数 */
 function setMode(m: Mode, seed = Date.now()) {
+  if (task && m !== scenarioById(task.id).mode) endTask();
   if (m === 'quiz') quiz.start(seed); else quiz.stop();
   if (m !== 'farm') farm.closeBook();
   mode = m;
@@ -84,14 +90,21 @@ const modeBtns = ([['grow', '栽培'], ['quiz', '症状診断'], ['farm', '経�
   return [k, b] as const;
 });
 
-/** 始め直す。作物を省くと今の作物のまま */
-function restart(crop = s.crop.id) {
-  s = createSim({ crop, events: growEvents, seed: newSeed() });
-  markSeen('crops', crop);
+/** 栽培の状態を差し替える（始め直す・課題を始める・課題をやめて元に戻す） */
+function setSim(next: SimState) {
+  s = next;
+  markSeen('crops', s.crop.id);
   hud.setCrop(cropSpec(s));
   markCrop();
-  resultShown = false;
+  // 終わった状態に戻したときは結果を出し直さない
+  resultShown = !!s.result;
   dirty = true;
+}
+
+/** 始め直す。作物を省くと今の作物のまま。課題中なら課題をやめる */
+function restart(crop = s.crop.id) {
+  if (task) endTask();
+  setSim(createSim({ crop, events: growEvents, seed: newSeed() }));
 }
 
 // 作物の選択（☰ の中）。育てている途中で変えるときは確かめる
@@ -118,7 +131,9 @@ const evBtns = ([[false, 'なし'], [true, 'あり']] as const).map(([v, label])
   b.textContent = label;
   b.title = v ? '停電とポンプの停止が起きる（平均 10日・12日に1回）。警報が出たら ×1 に落とす' : 'EC・pH・液量の管理に絞る';
   b.onclick = () => {
-    growEvents = s.facility.events = v;
+    growEvents = v;
+    // 課題の栽培は課題の設定のまま（やめて元に戻すときに反映する）
+    if (!task || scenarioById(task.id).mode !== 'grow') s.facility.events = v;
     for (const [k, x] of evBtns) x.classList.toggle('on', k === v);
     try { localStorage.setItem(EVENTS_KEY, v ? '1' : '0'); } catch { /* 保存できなくても今回は効く */ }
   };
@@ -126,6 +141,95 @@ const evBtns = ([[false, 'なし'], [true, 'あり']] as const).map(([v, label])
   $('ev').appendChild(b);
   return [v, b] as const;
 });
+
+// ---- 課題（☰ の「課題」）。課題の栽培・経営は別の状態で遊び、やめたら課題の前の続きに戻す ----
+
+/** 課題中の状態。finished は終わって記録したか、stash は課題を始める前の栽培・経営 */
+let task: { id: string; finished: boolean; stash: { s: SimState; farm: FarmState | null } } | null = null;
+const GUIDED_KEY = 'hydro-sim.guided';
+/** 初回の案内つきの課題 */
+const SCENARIOS_FIRST = 'first';
+
+/** 初回の案内（課題に guide があるとき）。止めるのは時間だけで、sim はふだんどおり */
+const guide = new Guide({
+  speed: () => speed,
+  setSpeed: v => setSpeed(v),
+  onEnd: () => { try { localStorage.setItem(GUIDED_KEY, '1'); } catch { /* 保存できなくても今回は効く */ } },
+});
+
+/** 今の課題を判定するための状態（モードごとに今遊んでいる sim の状態） */
+function taskRun(): ScenarioRun | null {
+  if (!task) return null;
+  const m = scenarioById(task.id).mode;
+  if (m === 'grow') return { scenario: task.id, mode: 'grow', sim: s };
+  if (m === 'farm') return { scenario: task.id, mode: 'farm', farm: farm.state };
+  return quiz.state ? { scenario: task.id, mode: 'quiz', quiz: quiz.state } : null;
+}
+
+/** 課題を始める（課題中なら今の課題をやめてから） */
+function startTask(id: string) {
+  if (task) endTask();
+  const sc = scenarioById(id), run = startScenario(id, newSeed());
+  task = { id, finished: false, stash: { s, farm: null } };
+  $('res').style.display = 'none';
+  if (run.mode === 'grow') { setSim(run.sim); setMode('grow'); }
+  else if (run.mode === 'quiz') { setMode('quiz'); quiz.load(run.quiz); }
+  else { task.stash.farm = farm.state; farm.reset(run.farm); setMode('farm'); }
+  if (sc.guide) guide.start(); else guide.stop();
+  if (app.classList.contains('so')) menu.click();
+  dirty = true;
+}
+
+/** 課題をやめて、課題の前の栽培・経営に戻す */
+function endTask() {
+  if (!task) return;
+  const { stash, id } = task;
+  task = null;
+  guide.stop();
+  if (scenarioById(id).mode === 'grow') { stash.s.facility.events = growEvents; setSim(stash.s); }
+  if (stash.farm) farm.reset(stash.farm);
+  dirty = true;
+}
+
+/** 課題のボタン（目標の欄・結果画面・終わりの窓）：quit＝やめる、retry＝もう一度、list＝一覧 */
+function taskAction(a: string) {
+  if (a === 'retry' && task) startTask(task.id);
+  else if (a === 'list') openTasks(startTask, task?.id ?? null);
+  else if (a === 'quit' && task) {
+    const quizTask = scenarioById(task.id).mode === 'quiz';
+    endTask();
+    if (quizTask) setMode('grow');
+  }
+}
+$('tko').onclick = () => openTasks(startTask, task?.id ?? null);
+quiz.again = () => (task ? startTask(task.id) : quiz.start(Date.now()));
+$('tg').addEventListener('click', e => {
+  const a = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-ta]')?.dataset.ta;
+  if (a) taskAction(a);
+});
+
+/** 課題の目標を描き直し、終わったら記録して判定を出す（栽培の判定は結果画面に入れる）。HUD と同じ間隔で呼ぶ */
+let taskVerdict: Verdict | null = null;
+function updateTask() {
+  const tg = $('tg'), run = taskRun();
+  let html = '';
+  taskVerdict = null;
+  if (task && run) {
+    const sc = scenarioById(task.id), v = judgeScenario(run);
+    taskVerdict = v;
+    html = goalHtml(sc, v);
+    const finished = run.mode === 'grow' ? !!run.sim.result
+      : run.mode === 'quiz' ? run.quiz.answers.every(a => a) : run.farm.hour >= (sc.goal.days ?? 30) * 24;
+    if (finished && !task.finished) {
+      task.finished = true;
+      recordTask(task.id, v);
+      if (run.mode === 'farm') { setSpeed(0); farm.closeBook(); }
+      if (run.mode !== 'grow') showVerdict(sc, v, taskAction);
+    }
+    if (sc.guide && mode === 'grow') guide.update(s);
+  }
+  if (tg.dataset.h !== html) { tg.dataset.h = html; tg.innerHTML = html; }
+}
 
 // 効果音（☰ の「音」。既定はなし）。記録の新しい分から鳴らす
 const sound = new Sound();
@@ -176,7 +280,10 @@ function slowOnAlarm(log: readonly { kind: string }[], from: number, fs: { outag
 // 画面サイズ・パネル位置から、3D がパネルに隠れない領域を決めてカメラを合わせ直す
 function layout() {
   const w = app.clientWidth, h = app.clientHeight, hb = $('hud').getBoundingClientRect(), bb = $('bar').getBoundingClientRect();
-  const sd = $('side').style;
+  const sd = $('side').style, gd = $('gd').style;
+  // 案内の吹き出し：道具バーの上（横向きスマホは道具バーの左）
+  if (LAND.matches) Object.assign(gd, { left: '', right: w - bb.left + 8 + 'px', top: '8px', bottom: '', transform: '' });
+  else Object.assign(gd, { left: '50%', right: '', top: '', bottom: h - bb.top + 8 + 'px', transform: 'translateX(-50%)' });
   if (LAND.matches) {
     // ☰ の中身は HUD と道具バーの間に開く
     Object.assign(sd, { left: hb.right + 8 + 'px', right: w - bb.left + 8 + 'px', top: '8px', maxHeight: h - 16 + 'px' });
@@ -220,6 +327,11 @@ menu.onclick = () => {
 const setToolScale = mountTools($('bar'), send);
 mountQuality($('qa'), q => view.setQuality(q));
 
+// 初めて開いたとき（課題の記録がなく、案内を見ていない）は案内つきの課題から始める
+let guided = false;
+try { guided = localStorage.getItem(GUIDED_KEY) === '1'; } catch { /* 保存できない環境では毎回案内する */ }
+if (!guided && noRecords()) startTask(SCENARIOS_FIRST);
+
 hud.update(s);
 layout();
 view.rig.goTo('全景', true);
@@ -251,9 +363,14 @@ function loop(now: number) {
   if (mode === 'grow') hear(s.log, s.facility); else if (mode === 'farm') hear(farm.state.log, farm.state.facility);
   sinceHud += dt;
   if (mode === 'grow') {
-    if (dirty || sinceHud > 0.1) { hud.update(s); updateAlarm(); dirty = false; sinceHud = 0; }
-    if (s.result && !resultShown) { resultShown = true; showResult(s.result, s.crop.id, restart); if (s.result.outcome === 'harvest') sound.play('harvest'); }
-  } else if (dirty || sinceHud > 0.1) { if (mode === 'farm') farm.update(); updateAlarm(); dirty = false; sinceHud = 0; }
+    if (dirty || sinceHud > 0.1) { hud.update(s); updateAlarm(); updateTask(); dirty = false; sinceHud = 0; }
+    if (s.result && !resultShown) {
+      resultShown = true;
+      const t = task && taskVerdict ? { html: verdictHtml(scenarioById(task.id), taskVerdict), onAction: taskAction } : undefined;
+      showResult(s.result, s.crop.id, restart, t);
+      if (s.result.outcome === 'harvest') sound.play('harvest');
+    }
+  } else if (dirty || sinceHud > 0.1) { if (mode === 'farm') farm.update(); updateAlarm(); updateTask(); dirty = false; sinceHud = 0; }
   // 部屋の時計：進めている途中の端数（acc）も足して、朝夕の光を滑らかに変える。症状診断は昼の光で見せる
   if (mode === 'farm') view.frameFarm(farm.state, farm.rack, farm.slot, farm.sim ?? s, now / 1000, farm.blind, farm.state.hour + (speed ? acc : 0));
   else if (quiz.sim) view.frame(quiz.sim, now / 1000, quiz.blind, 12);
@@ -306,6 +423,11 @@ Object.assign(window, {
       }
       dirty = true;
     },
+    /** 課題：task('thin') で始める、task(null) でやめる。taskState で今の課題と判定 */
+    task(id: string | null) { if (id) startTask(id); else endTask(); },
+    get taskState() { updateTask(); return task && { ...task, verdict: taskVerdict }; },
+    /** 課題の一覧を開く */
+    tasks() { openTasks(startTask, task?.id ?? null); },
     /** 図鑑を開く（'crops' / 'symptoms'） */
     zukan: openZukan,
     quiz,

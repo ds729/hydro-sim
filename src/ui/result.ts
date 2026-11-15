@@ -19,8 +19,11 @@ const TITLE: Record<Result['outcome'], (r: Result) => [string, string]> = {
   late: () => ['収穫に至りませんでした', '成長が遅れすぎました。'],
 };
 
-/** 結果を出す。onRestart には次に育てる作物を渡す（「もう一度」は同じ作物、下の段で別の作物） */
-export function showResult(r: Result, crop: string, onRestart: (crop: string) => void): void {
+/**
+ * 結果を出す。onRestart には次に育てる作物を渡す（「もう一度」は同じ作物、下の段で別の作物）。
+ * 課題中は task を渡し、下の段を課題の判定（verdictHtml。ボタンは data-ta）に替える
+ */
+export function showResult(r: Result, crop: string, onRestart: (crop: string) => void, task?: { html: string; onAction: (a: string) => void }): void {
   const box = document.getElementById('res')!, [title, sub] = TITLE[r.outcome](r);
   const c = r.costs, yen = (v: number) => `¥${Math.round(v).toLocaleString()}`;
   document.getElementById('rb')!.innerHTML = `<h2>${title}</h2><div>${sub}</div>${lossHtml(r)}<table>`
@@ -28,10 +31,17 @@ export function showResult(r: Result, crop: string, onRestart: (crop: string) =>
     + `<tr><td>種・培地</td><td>−${yen(c.seed + c.medium)}</td></tr><tr><td>電気代</td><td>−${yen(c.power)}</td></tr>`
     + `<tr><td>包装</td><td>−${yen(c.pack)}</td></tr><tr><td>養液・調整剤</td><td>−${yen(c.supplies)}</td></tr>`
     + `<tr><td><b>利益</b></td><td><b>${r.profit < 0 ? '−' : ''}${yen(Math.abs(r.profit))}</b></td></tr>`
-    + `</table><small class="rn">家賃・人件費は含めない。経営モードと同じ単価・費用（推定）</small><button data-crop="${crop}" style="width:100%">もう一度育てる</button>`
-    + `<h3>別の作物で</h3><div class="g">${Object.entries(CROPS).filter(([id]) => id !== crop)
-      .map(([id, c]) => `<button data-crop="${id}">${shortName(c.name)}</button>`).join('')}</div>`;
+    + '</table><small class="rn">家賃・人件費は含めない。経営モードと同じ単価・費用（推定）</small>'
+    + (task ? task.html : `<button data-crop="${crop}" style="width:100%">もう一度育てる</button>`
+      + `<h3>別の作物で</h3><div class="g">${Object.entries(CROPS).filter(([id]) => id !== crop)
+        .map(([id, c]) => `<button data-crop="${id}">${shortName(c.name)}</button>`).join('')}</div>`);
   box.style.display = 'flex';
+  for (const b of box.querySelectorAll<HTMLButtonElement>('button[data-ta]')) {
+    b.onclick = () => {
+      box.style.display = 'none';
+      task!.onAction(b.dataset.ta!);
+    };
+  }
   for (const b of box.querySelectorAll<HTMLButtonElement>('button[data-crop]')) {
     b.onclick = () => {
       box.style.display = 'none';
