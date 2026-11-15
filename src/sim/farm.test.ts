@@ -312,9 +312,9 @@ describe('経営モード（Phase 4）', () => {
 
   test('1か月回せる：納品日から逆算して播けば、契約を守って黒字の月次損益が出る', () => {
     const f = createFarm();
-    // ひまわり・豆苗（EC の適正が 1.2 まで）は棚を分ける。アブラナ科（1.0 から）と同じ養液だと重なりが狭く、遅れて納品に間に合わない
+    // ひまわり（EC の適正が 1.2 まで）は棚を分ける。アブラナ科・豆苗（0.8〜1.0 から 2.0 まで）と同じ養液だと重なりが狭く、遅れて納品に間に合わない
     applyFarmCommand(f, { type: 'buy', item: 'rack' });
-    const rackFor = (crop: string) => (crop === 'sunflower' || crop === 'pea' ? 'rack2' : R);
+    const rackFor = (crop: string) => (crop === 'sunflower' ? 'rack2' : R);
     run(f, 24 * BUSINESS.monthDays, f => {
       keepInBand(f);
       harvestRipe(f);
