@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { applyCommand, bedOf, createSim, CROPS, cropSpec, diagnose, ecOf, mulberry32, tick, type Command, type SimState } from './index';
+import { applyCommand, bedOf, BUSINESS, createSim, CROPS, cropSpec, diagnose, ecOf, mulberry32, tick, trayCost, trayEstimate, type Command, type SimState } from './index';
 
 const fert: Command = { type: 'dose', target: 'bed', supply: 'fertilizer', amount: 10 };
 const water: Command = { type: 'dose', target: 'bed', supply: 'water', amount: 0.2 };
@@ -47,6 +47,27 @@ describe('作物（Phase 3）', () => {
     expect(runToEnd(createSim({ crop: id })).outcome).not.toBe('harvest');
   });
 
+  // Phase 6：栽培モードのトレイは経営モードの1トレイと同じ。収量・単価・種・培地・電気代・包装は business.json から
+  test.each(Object.keys(CROPS))('%s：栽培モードの収量・損益は経営モードの直売の見込みと揃う', id => {
+    const s = createSim({ crop: id }), r = runToEnd(s, keepInBand), b = BUSINESS.crops[id];
+    expect(CROPS[id].yieldG).toBe(b.trayYieldG);
+    expect(CROPS[id].pricePer100g).toBe(b.retailPer100g);
+    expect(r.costs).toMatchObject(trayCost(id, s.hour / 24));
+    expect(r.cost).toBeCloseTo(r.costs.seed + r.costs.medium + r.costs.power + r.costs.pack + r.costs.supplies);
+    // 経営モードで1トレイを全部直売した場合（等級 A・需要の上限なし）と、損得の向きが同じ
+    const directAll = (b.trayYieldG / 100) * (b.retailPer100g - BUSINESS.channels.direct.packYenPer100g) - trayEstimate(id).cost.total;
+    expect(Math.sign(r.profit)).toBe(Math.sign(directAll));
+  });
+
+  test('豆苗は量販の単価なので、S 収穫でも赤字。マイクログリーン3種は黒字', () => {
+    for (const id of Object.keys(CROPS)) {
+      const r = runToEnd(createSim({ crop: id }), keepInBand);
+      expect(r.grade).toBe('S');
+      if (id === 'pea') expect(r.profit).toBeLessThan(0);
+      else expect(r.profit).toBeGreaterThan(0);
+    }
+  });
+
   test('ない作物はエラー', () => {
     expect(() => createSim({ crop: 'tomato' })).toThrow();
   });
@@ -90,8 +111,9 @@ describe('roadmap Phase 1 の完了条件', () => {
     const r = runToEnd(s, s => { if (s.hour % 6 === 0) applyCommand(s, fert); });
     expect(r.outcome).toBe('dead');
     expect(s.hour).toBe(117);
-    expect(r.cost).toBe(600);
-    expect(r.profit).toBe(-600);
+    expect(r.costs.supplies).toBeCloseTo(20);
+    expect(r.yieldG).toBe(0);
+    expect(r.profit).toBeCloseTo(-r.cost);
   });
 });
 
@@ -102,7 +124,7 @@ describe('コマンド', () => {
     expect(ecOf(b)).toBeCloseTo(1.35);
     applyCommand(s, water);
     expect(b.water).toBeCloseTo(2.2);
-    expect(s.cost).toBe(30);
+    expect(s.cost).toBeCloseTo(1);
     expect(s.log.at(-1)).toEqual({ hour: 0, kind: 'command', command: water });
   });
 
@@ -119,7 +141,7 @@ describe('コマンド', () => {
     applyCommand(s, fert);
     applyCommand(s, { type: 'replaceSolution', target: 'bed' });
     expect([b.water, ecOf(b), b.ph]).toEqual([2, 1.2, 6]);
-    expect(s.cost).toBe(130);
+    expect(s.cost).toBeCloseTo(11);
   });
 
   test('終わった後は受け付けない', () => {

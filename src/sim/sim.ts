@@ -4,6 +4,7 @@ import { execute, SUPPLIES, type Command, type DoseSupply } from './commands';
 import { applyFlows, ecOf, fill, findCompartment, type Compartment, type Flow, type Solution } from './compartment';
 import { CROPS, FACTORS, MEASURE, diurnal, exchange, isLit, fitness, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
 import { limiting, side } from './fitness';
+import { BUSINESS, trayCost } from './farm';
 import { aerate, createFacility, endHour, fixPump, o2Fitness, powered, pumpRunning, rollEvents, watchHypoxia, type FacilityEvent, type FacilityState } from './facility';
 
 /** 設備の構成。水耕は栽培槽1区画で流れなし */
@@ -42,7 +43,11 @@ export interface Result {
   quality: number;
   grade: Grade;
   yieldG: number;
+  /** 売上：直売の単価（business.json の小売単価）× 等級の倍率 */
   sales: number;
+  /** 費用の内訳 円。種・培地・電気代（経過日数分）・包装（直売）は経営モードの1トレイと同じ数え方、資材は養液・調整剤 */
+  costs: { seed: number; medium: number; power: number; pack: number; supplies: number };
+  /** 費用の合計 */
   cost: number;
   profit: number;
   /** 品質を下げた原因：`${要因}.${low|high}` ごとの品質の低下分（合計 ＝ 1 − 品質）。大きい順 */
@@ -158,9 +163,12 @@ export function applyCommand(s: SimState, cmd: Command): boolean {
 function finish(s: SimState, outcome: Result['outcome']): void {
   const spec = cropSpec(s), h = harvestOf(s.crop, spec, s.hour), q = h.quality, grade = h.grade;
   const yieldG = outcome === 'harvest' ? h.yieldG : 0;
-  const sales = (yieldG / 100) * spec.pricePer100g * h.mult;
+  const direct = BUSINESS.channels.direct;
+  const sales = (yieldG / 100) * spec.pricePer100g * direct.priceMult * h.mult;
+  const costs = { ...trayCost(s.crop.id, s.hour / 24), pack: (yieldG / 100) * direct.packYenPer100g, supplies: s.cost };
+  const cost = costs.seed + costs.medium + costs.power + costs.pack + costs.supplies;
   const losses = Object.entries(s.loss).map(([key, v]) => ({ key, value: v / s.hour })).sort((a, b) => b.value - a.value);
-  s.result = { outcome, quality: q, grade, yieldG, sales, cost: s.cost, profit: sales - s.cost, losses };
+  s.result = { outcome, quality: q, grade, yieldG, sales, costs, cost, profit: sales - cost, losses };
 }
 
 /** 資材が要因を動かす向き（+1 上げる、−1 下げる、0 動かさない）。EC は塩類で上がり、水で薄まる */

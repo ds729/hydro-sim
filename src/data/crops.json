@@ -15,8 +15,6 @@
       "saltRatio": 0.6,
       "phDriftPerH": 0.01
     },
-    "yieldG": 80,
-    "pricePer100g": 1200,
     "look": { "leafShape": "heart", "stem": "#eef1e2", "leaf": "#79cf55", "height": 1, "leafSize": 1, "stemWidth": 0.9 }
   },
   "broccoli": {
@@ -35,8 +33,6 @@
       "saltRatio": 0.6,
       "phDriftPerH": 0.012
     },
-    "yieldG": 80,
-    "pricePer100g": 1400,
     "look": { "leafShape": "heart", "stem": "#dfe6cf", "leaf": "#4a8f5c", "height": 0.75, "leafSize": 0.8, "stemWidth": 0.8 }
   },
   "sunflower": {
@@ -55,8 +51,6 @@
       "saltRatio": 0.4,
       "phDriftPerH": 0.008
     },
-    "yieldG": 120,
-    "pricePer100g": 700,
     "look": { "leafShape": "oval", "stem": "#f0eedb", "leaf": "#4f9e3c", "height": 1.1, "leafSize": 1.25, "stemWidth": 1.6 }
   },
   "pea": {
@@ -75,8 +69,6 @@
       "saltRatio": 0.5,
       "phDriftPerH": 0.008
     },
-    "yieldG": 80,
-    "pricePer100g": 400,
     "look": { "leafShape": "pea", "stem": "#a6d47e", "leaf": "#58ad48", "height": 1.7, "leafSize": 0.8, "stemWidth": 0.75 }
   }
 }

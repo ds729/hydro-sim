@@ -33,7 +33,7 @@ function cropHtml(): string {
     const bands = BANDS.map(([k, label, unit]) => `${label} ${c.bands[k][1].toFixed(1)}〜${c.bands[k][2].toFixed(1)}${unit}`).join('・');
     return `<div class="ze${seen.crops.includes(id) ? '' : ' un'}">`
       + `<b><i class="zs" style="background:${c.look.leaf};border-color:${c.look.stem}"></i>${shortName(c.name)}</b>${badge(seen.crops.includes(id), '育てた')}`
-      + `<p>${c.note}</p><small>収穫 ${c.days}日・適正 ${bands}<br>収量 ${c.yieldG}g・単価 ${c.pricePer100g}円/100g</small></div>`;
+      + `<p>${c.note}</p><small>収穫 ${c.days}日・適正 ${bands}<br>1トレイの収量 ${c.yieldG}g・直売の単価 ${c.pricePer100g.toLocaleString()}円/100g（推定）</small></div>`;
   }).join('');
 }
 

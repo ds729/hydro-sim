@@ -1,6 +1,7 @@
 // 作物：区画の物質を消費・生成するモデル。作物ごとの違いは crops.json に寄せる
 // 生き物（作物・v2 の魚・硝化菌）は「exchange で区画の物質をやり取りし、適合度で育つ・弱る」形に揃える
 
+import businessJson from '../data/business.json';
 import cropsJson from '../data/crops.json';
 import { ecOf, type Compartment } from './compartment';
 import { trapezoid, type Band } from './fitness';
@@ -34,15 +35,23 @@ export interface CropSpec {
     /** 根の活動による pH の上昇 /h（活動度を掛ける） */
     phDriftPerH: number;
   };
-  /** 最適条件・健康度 100 での収量 g */
+  /** 最適条件・健康度 100 での1トレイの収量 g（business.json の trayYieldG。栽培モードのトレイは経営モードの1トレイと同じ） */
   yieldG: number;
+  /** 小売（直売）の単価 円/100g（business.json の retailPer100g） */
   pricePer100g: number;
   /** 見た目（描画層が使う。sim は使わない）。色は '#rrggbb'、大きさは基準（ラディッシュ）に対する倍率 */
   look: { leafShape: LeafShape; stem: string; leaf: string; height: number; leafSize: number; stemWidth: number };
 }
 
-// JSON の配列は TS ではタプルにならないので unknown を経由する。中身は crop.test.ts で検査する
-export const CROPS = cropsJson as unknown as Record<string, CropSpec>;
+/**
+ * 作物の定義。育ち方は crops.json、収量と単価は business.json（2つのモードで同じ作物の損得が食い違わないよう、値は1か所に置く）。
+ * JSON の配列は TS ではタプルにならないので unknown を経由する。中身は crop.test.ts で検査する
+ */
+export const CROPS = Object.fromEntries(Object.entries(cropsJson).map(([id, c]) => {
+  const b = (businessJson.crops as Record<string, { trayYieldG: number; retailPer100g: number }>)[id];
+  if (!b) throw new Error(`business.json に作物 ${id} がありません`);
+  return [id, { ...c, yieldG: b.trayYieldG, pricePer100g: b.retailPer100g }];
+})) as unknown as Record<string, CropSpec>;
 
 export interface CropState {
   id: string;

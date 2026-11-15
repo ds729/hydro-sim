@@ -15,9 +15,9 @@ export interface CropBusiness {
   seedG: number;
   /** 種子の単価 円/g */
   seedYenPerG: number;
-  /** 最適条件・健康度 100 での1トレイの収量 g（crops.json の yieldG は栽培モードの比。経営ではこちらを使う） */
+  /** 最適条件・健康度 100 での1トレイの収量 g（栽培モードの収量 CROPS[id].yieldG もこの値） */
   trayYieldG: number;
-  /** 小売（直売）の単価 円/100g（等級 A）。販路の倍率を掛けて使う */
+  /** 小売（直売）の単価 円/100g（等級 A）。販路の倍率を掛けて使う。栽培モードは直売で売った場合として使う */
   retailPer100g: number;
   /** 業務用冷蔵庫がないときの日持ち（日）。業務用冷蔵庫（4℃前後）で fridgeShelfMult 倍 */
   shelfDays: number;
@@ -678,12 +678,21 @@ export interface TrayEstimate {
   outlets: TrayOutlet[];
 }
 
+/** 1トレイの種・培地・電気代（棚1台の電気代をトレイ数で割り、days 日分）。栽培モードの結果画面でも使う */
+export function trayCost(crop: string, days: number, b: Business = BUSINESS, led = false): { seed: number; medium: number; power: number } {
+  const cb = b.crops[crop];
+  return {
+    seed: cb.seedG * cb.seedYenPerG,
+    medium: b.mediumYenPerTray,
+    power: (b.powerYenPerRackDay / b.slotsPerRack) * days * (led ? b.ledPowerMult : 1),
+  };
+}
+
 /** 作物ごとの1トレイの損益見込み（等級 A・健康に育った場合）。eq は持っている設備（省エネ LED・業務用冷蔵庫が効く） */
 export function trayEstimate(crop: string, b: Business = BUSINESS, eq: Partial<Record<EquipmentId, number>> = {}, contracts: Contract[] = b.contracts): TrayEstimate {
   const cb = b.crops[crop], days = CROPS[crop].days, g = cb.trayYieldG, led = !!eq.led;
   const shelf = cb.shelfDays * (eq.fridge ? b.fridgeShelfMult : 1);
-  const seed = cb.seedG * cb.seedYenPerG, medium = b.mediumYenPerTray;
-  const power = (b.powerYenPerRackDay / b.slotsPerRack) * days * (led ? b.ledPowerMult : 1);
+  const { seed, medium, power } = trayCost(crop, days, b, led);
   const total = seed + medium + power;
   const net = (grams: number, ch: RevenueKey, contract?: Contract) =>
     (grams / 100) * (unitPrice(b, crop, ch, contract) - b.channels[ch].packYenPer100g);
