@@ -227,7 +227,7 @@ export class FarmPanel {
       const status = st.lost ? '<em class="ng">契約切れ</em>' : `次 Day ${next}（あと${next - today}日）`;
       return `<div class="fs${st.lost ? ' lost' : ''}" title="${c.note ?? ''}"><b>${c.name}</b> ${terms(c)}`
         + `<small>${c.pricePer100g ? `${yen(c.pricePer100g)}/100g・` : ''}${status}・欠品 ${st.misses}/${c.maxMisses}</small></div>`;
-    }).join(''));
+    }).join('') + '<small>契約の単価・量は推定（国内の飲食店への聞き取りはまだ）</small>');
     setHtml($('flg'), logHtml(f));
   }
 
@@ -249,7 +249,7 @@ export class FarmPanel {
     const body = tab === 'pl' ? plHtml(this.f) : tab === 'est' ? estHtml(this.f) : equipHtml(this.f);
     setHtml($('bp'), `<div class="zh"><h2>帳簿</h2><button data-close="1" aria-label="閉じる">✕</button></div>`
       + `<div class="g3">${T.map(([k, l]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${l}</button>`).join('')}</div>`
-      + `<div class="zl">${body}</div><small class="zn">※数値は仮置きの簡略モデルです（根拠は公開前に裏取りする）。</small>`);
+      + `<div class="zl">${body}</div><small class="zn">※簡略化したモデルです。販売の単価・需要・契約の量は推定かゲーム都合の値です（📗 図鑑の「資材・費用」の札）。</small>`);
   }
 
   /** 選んだトレイ（空きなら棚の別のトレイ）を栽培モードの栽培槽の形にする。値は計器の読みではなく実際の値（見た目は本物） */
