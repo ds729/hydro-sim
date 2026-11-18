@@ -19,6 +19,8 @@ export class QuizPanel {
   private buttons = new Map<string, HTMLButtonElement>();
   /** 結果の「もう一周」で呼ぶ（課題中は課題をはじめから。省くと新しい問題で1周） */
   again: (() => void) | null = null;
+  /** 1周を終えたとき（自己ベストの記録）。結果に添える html を返す */
+  onDone: ((score: number, of: number) => string) | null = null;
 
   constructor(private onExit: () => void) {
     for (const c of QUIZ_CAUSES) {
@@ -108,7 +110,7 @@ export class QuizPanel {
       const a = z.answers[i]!, ok = causeKey(a) === causeKey(q.cause), sy = symptomOf(q.cause);
       return `<li>${ok ? '⭕' : '❌'} ${shortName(CROPS[q.crop].name)}：${sy.label}（${sy.name}）${ok ? '' : `<small>あなた：${symptomOf(a).label}</small>`}</li>`;
     }).join('');
-    $('qz').innerHTML = `<p class="qq"><b>${n} 問中 ${sc} 問正解</b>${sc === n ? '　全問正解！' : ''}</p><ul class="ql">${rows}</ul>`
+    $('qz').innerHTML = `<p class="qq"><b>${n} 問中 ${sc} 問正解</b>${sc === n ? '　全問正解！' : ''}</p>${this.onDone?.(sc, n) ?? ''}<ul class="ql">${rows}</ul>`
       + '<div class="g"><button id="qg">もう一周</button><button id="qx">栽培に戻る</button></div>';
     $('qg').onclick = () => (this.again ? this.again() : this.start(Date.now()));
     $('qx').onclick = () => this.onExit();

@@ -51,7 +51,7 @@ export class FarmPanel {
   private bookTab: BookTab | null = null;
   private seenLog = 0;
 
-  constructor(private f: FarmState, private onMonth: () => void) {
+  constructor(private f: FarmState, private onMonth: (l: Ledger) => void) {
     $('fms').onclick = () => this.send({ type: 'measure' });
     $('fbk').onclick = () => this.openBook('pl');
     $('bk').onclick = e => { if (e.target === $('bk')) this.closeBook(); };
@@ -115,7 +115,7 @@ export class FarmPanel {
     this.side();
     if (this.bookTab) this.book();
     // 月の締め：時間を止めて損益を見せる
-    for (const e of f.log.slice(this.seenLog)) if (e.kind === 'month') { this.onMonth(); this.openBook('pl'); }
+    for (const e of f.log.slice(this.seenLog)) if (e.kind === 'month') { this.onMonth(e.ledger); this.openBook('pl'); }
     this.seenLog = f.log.length;
     this.view = this.traySim();
   }

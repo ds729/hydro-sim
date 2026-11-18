@@ -1,0 +1,168 @@
+{
+  "status": {
+    "checked": { "label": "確認済み", "desc": "出典の本文で確かめた値" },
+    "estimate": { "label": "推定", "desc": "出典はあるが、近い作物からの類推・抜粋だけでの確認・海外の値の換算など" },
+    "unverified": { "label": "未確認", "desc": "一般的な目安から置いた値。出典をまだ確かめていない" },
+    "game": { "label": "ゲーム都合", "desc": "遊びやすさのために決めた値。実際の値とは限らない" }
+  },
+  "refs": {
+    "1": "Growing Microgreens（Cornell Cooperative Extension Orange County。Clemson Extension の資料の転載）",
+    "2": "Grow Your Own Microgreens（Utah State University Extension、2025）",
+    "3": "Palmitessa ほか、Foods 9(5):677（2020）。アブラナ科のマイクログリーンと養液の濃さ",
+    "4": "Wieth ほか、Revista Caatinga 32(4)（2019）。紫キャベツのマイクログリーンと養液の濃さ",
+    "5": "Johnny's Selected Seeds「Micro Greens Yield Trial」（2017）",
+    "8": "Chlorosis（Illinois Extension）",
+    "9": "Floriculture and Controlled Environment Horticulture：Nutrition（University of Kentucky）",
+    "10": "Outline of nutrient disorders（UMass Extension）",
+    "11": "科研費 実績報告書 KAKENHI-PROJECT-14J06094（愛媛大学、2014）。コマツナの湛液栽培",
+    "12": "水耕ネギ根腐病の伝染を抑える培養液の低 pH 管理法（広島県立総合技術研究所、2013）",
+    "15": "ミニトマトのハウス促成栽培で発生した鉄欠乏による上位葉の黄化症状（千葉県農林総合研究センター）",
+    "16": "人工光源下でのパルプ培地を用いた簡易なスプラウト生産技術（農研機構 九州沖縄農業研究センター、2017）",
+    "17": "豆苗の育成工程（村上農園）",
+    "18": "Gutiérrez Chávez ほか、Rev. Fac. Agron. (LUZ) 42(3)（2025）。水耕のエンドウのマイクログリーン",
+    "19": "Sirinupong ほか、Agr. Nat. Resour. 58（2024）。ひまわりのマイクログリーンの葉面散布",
+    "R": "マイクログリーンの経営の数値の調査（米国の大学の普及資料・種苗会社の資料と、国内の販売価格。2026）"
+  },
+  "crops": {
+    "radish": {
+      "days": { "s": "checked", "refs": ["1", "2", "5", "16"] },
+      "ec": { "s": "estimate", "refs": ["3", "4"], "note": "ラディッシュそのものの試験はなく、同じアブラナ科のブロッコリーなどから当てはめた" },
+      "ph": { "s": "estimate", "refs": ["15", "4", "8"] },
+      "water": { "s": "game" },
+      "yield": { "s": "estimate", "refs": ["R"] },
+      "price": { "s": "estimate", "refs": ["R"] },
+      "seed": { "s": "estimate", "refs": ["R"] }
+    },
+    "broccoli": {
+      "days": { "s": "checked", "refs": ["1", "2", "5"] },
+      "ec": { "s": "checked", "refs": ["3", "4"] },
+      "ph": { "s": "estimate", "refs": ["15", "4", "8"] },
+      "water": { "s": "game" },
+      "yield": { "s": "estimate", "refs": ["R"] },
+      "price": { "s": "estimate", "refs": ["R"] },
+      "seed": { "s": "estimate", "refs": ["R"] }
+    },
+    "sunflower": {
+      "days": { "s": "checked", "refs": ["1", "2", "19"] },
+      "ec": { "s": "estimate", "refs": ["19"], "note": "葉に養液をかける試験からの類推。根を養液に浸す水耕の試験ではない" },
+      "ph": { "s": "estimate", "refs": ["15", "4", "8"] },
+      "water": { "s": "game" },
+      "yield": { "s": "estimate", "refs": ["R"] },
+      "price": { "s": "estimate", "refs": ["R"] },
+      "seed": { "s": "estimate", "refs": ["R"] }
+    },
+    "pea": {
+      "days": { "s": "checked", "refs": ["1", "2", "17", "18"] },
+      "ec": { "s": "checked", "refs": ["18"], "note": "試験は1本（EC 2.3 と水だけの比較）" },
+      "ph": { "s": "estimate", "refs": ["15", "4", "8"] },
+      "water": { "s": "game" },
+      "yield": { "s": "estimate", "refs": ["R"] },
+      "price": { "s": "checked", "refs": ["R"], "note": "量販の豆苗の店頭価格" },
+      "seed": { "s": "estimate", "refs": ["R"] }
+    }
+  },
+  "symptoms": {
+    "ec.low": { "s": "estimate", "refs": ["10"] },
+    "ec.high": { "s": "checked", "refs": ["11"] },
+    "ph.low": { "s": "estimate", "refs": ["9", "12"] },
+    "ph.high": { "s": "checked", "refs": ["8"] },
+    "water.low": { "s": "unverified" },
+    "water.high": { "s": "unverified" },
+    "o2.low": { "s": "unverified" }
+  },
+  "supplies": [
+    {
+      "id": "fertilizer", "icon": "🧴",
+      "note": "濃い液体肥料。入れると養液の肥料分（EC）が上がる。作物は肥料分より水を多く吸うので、足しすぎると後で濃くなりやすい。",
+      "values": [
+        { "label": "価格", "value": "{price}", "s": "estimate", "refs": ["R"], "note": "液肥を薄めた養液 1L ≒ 4円から換算" },
+        { "label": "10mL で", "value": "EC +0.15（養液 2L）", "s": "game" }
+      ]
+    },
+    {
+      "id": "water", "icon": "💧",
+      "note": "水道水。減った液量を戻し、濃くなった養液を薄める。",
+      "values": [
+        { "label": "価格", "value": "0円（水道代は数えない）", "s": "game" }
+      ]
+    },
+    {
+      "id": "phDown", "icon": "⬇️",
+      "note": "酸の調整剤。pH を下げる。根の活動で pH は少しずつ上がるので、いちばんよく使う。",
+      "values": [
+        { "label": "価格", "value": "{price}", "s": "unverified" },
+        { "label": "1回で", "value": "pH −0.3", "s": "game" }
+      ]
+    },
+    {
+      "id": "phUp", "icon": "⬆️",
+      "note": "アルカリの調整剤。pH を上げる。下げすぎたときに戻す。",
+      "values": [
+        { "label": "価格", "value": "{price}", "s": "unverified" },
+        { "label": "1回で", "value": "pH +0.3", "s": "game" }
+      ]
+    },
+    {
+      "id": "solution", "icon": "🔄",
+      "note": "養液を捨てて、新しい養液（EC 1.2・pH 6.0・2L）に入れ替える。何がずれたか分からないときの立て直しに使える。",
+      "values": [
+        { "label": "価格", "value": "{price}", "s": "estimate", "refs": ["R"], "note": "肥料の価格から計算" },
+        { "label": "新しい養液の EC", "value": "1.2", "s": "game", "note": "試験で使われる濃さ（1.2〜1.4）に近い" }
+      ]
+    }
+  ],
+  "costs": [
+    { "label": "種", "value": "1トレイ 50〜350円（作物のタブ）", "s": "estimate", "refs": ["R"] },
+    { "label": "培地", "value": "{medium}", "s": "estimate", "refs": ["R"] },
+    { "label": "電気代", "value": "{power}", "s": "estimate", "refs": ["R"], "note": "LED 15W×16時間と空調から計算" },
+    { "label": "包装（直売）", "value": "{packDirect}", "s": "estimate", "refs": ["R"], "note": "透明パックの価格から" },
+    { "label": "包装（飲食店・卸）", "value": "{packOther}", "s": "game" },
+    { "label": "家賃（経営）", "value": "{rent}", "s": "estimate", "refs": ["R"] },
+    { "label": "販路の単価（直売を 1）", "value": "{channels}", "s": "game", "note": "国内の飲食店向けの価格は見つからなかった。聞き取りは v1.0 の後" },
+    { "label": "契約の量・申し出", "value": "取引先1件 週 100〜1,000g", "s": "game" }
+  ],
+  "equipment": [
+    { "id": "bed", "icon": "🪴", "name": "栽培槽とトレイ", "note": "養液を張った槽にトレイを浮かべ、根を養液に浸して育てる（湛液式）。トレイ1枚は経営モードの1トレイと同じ。",
+      "values": [{ "label": "養液", "value": "既定 2L（容量 3L）", "s": "game" }] },
+    { "id": "pump", "icon": "⚙️", "name": "給液ポンプ", "note": "養液を循環させて、根に要る酸素を溶かし込む。止まると養液の酸素が少しずつ減る。",
+      "values": [{ "label": "酸素の減り方", "value": "一晩は持ち、1日で根が傷み始める", "s": "game" }] },
+    { "id": "led", "icon": "💡", "name": "LED 照明", "note": "決まった時刻に点け消しする。夜は葉の気孔が閉じ、根の吸水がゆっくりになる。",
+      "values": [{ "label": "点灯", "value": "{lightHours}", "s": "unverified" }, { "label": "夜の根の活動", "value": "{darkRatio}", "s": "unverified" }] },
+    { "id": "sensor", "icon": "📟", "name": "センサ・制御盤・モニタ", "note": "EC・pH・液量を測って制御盤とモニタに出す。経営モードはペン型の計器で、朝と測ったときだけ読める（連続測定センサを買うと毎時）。",
+      "values": [] },
+    { "id": "tank", "icon": "🛢️", "name": "養液タンク", "note": "養液を溜めてポンプで栽培槽に送る。資材はタンクの点検口から入れる。",
+      "values": [] }
+  ],
+  "equipmentBusiness": {
+    "rack": { "icon": "🗄️", "price": "estimate", "effect": "game" },
+    "autoWater": { "icon": "🚰", "price": "game", "effect": "game" },
+    "autoPh": { "icon": "🧪", "price": "estimate", "effect": "game" },
+    "probe": { "icon": "📈", "price": "estimate", "effect": "game" },
+    "fridge": { "icon": "🧊", "price": "game", "effect": "estimate" },
+    "led": { "icon": "🔆", "price": "game", "effect": "game" },
+    "ups": { "icon": "🔋", "price": "game", "effect": "game" },
+    "sparePump": { "icon": "🔧", "price": "game", "effect": "game" }
+  },
+  "events": [
+    { "id": "night", "icon": "🌙", "name": "昼と夜",
+      "note": "照明は朝 6時に点き、夜 22時に消える。夜は根の活動が落ち、液の減りと pH の上がり方がゆっくりになる（1日の合計と育つ日数は変わらない）。",
+      "fix": "夜のうちは値があまり動かない。朝に測って直す、の段取りで間に合う。",
+      "values": [{ "label": "点灯", "value": "{lightHours}", "s": "unverified" }] },
+    { "id": "outage", "icon": "⚡", "name": "停電",
+      "note": "照明とポンプが止まる。ポンプが止まると養液の酸素が減っていく。数時間なら根は持つ。",
+      "fix": "待つしかない。経営モードでは非常用電源でポンプだけ動かし続けられる。",
+      "values": [{ "label": "起きる頻度", "value": "{outage}", "s": "game", "note": "実際の停電はずっと少ない" }] },
+    { "id": "pumpStop", "icon": "🛑", "name": "ポンプの停止",
+      "note": "ポンプが詰まって止まる。運転ランプが赤く点滅し、モニタに警報が出る。放っておくと根が酸欠で茶色になる。",
+      "fix": "警報の「🔧 直す」で掃除して動かし直す。経営モードでは予備ポンプがすぐ切り替わる（掃除の作業時間はかかる）。",
+      "values": [{ "label": "起きる頻度", "value": "{pump}", "s": "game" }] },
+    { "id": "offer", "icon": "📨", "name": "取引の申し出（経営）",
+      "note": "納品を続けて評判が上がると、新しいお店から契約の申し出が来る。量の多い申し出は、棚を増やさないと回らない。",
+      "fix": "☰ の経営の契約で受けるか断る。受けてから最初の納品まで 7日。",
+      "values": [{ "label": "評判", "value": "納品 +1・欠品 −2・解約 −4", "s": "game" }] },
+    { "id": "miss", "icon": "📦", "name": "欠品と解約（経営）",
+      "note": "納品の日に約束の量を出せないと欠品。欠品が重なると契約を切られ、評判も下がる。記録に欠品の原因（収穫していない・播くのが遅い など）が出る。",
+      "fix": "納品の曜日から逆算して播く。作物の日数と日持ち（冷蔵庫なしで 3日）を見て、ずらして播く。",
+      "values": [{ "label": "解約まで", "value": "1割を超える欠品が 2回", "s": "game" }] }
+  ]
+}

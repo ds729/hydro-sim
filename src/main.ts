@@ -2,7 +2,7 @@
 
 import './ui/style.css';
 import {
-  applyCommand, BUSINESS, createFarm, createSim, CROPS, cropSpec, farmTick, judgeScenario, scenarioById, startOutage, startScenario, stopPump, tick,
+  applyCommand, BUSINESS, totals, createFarm, createSim, CROPS, cropSpec, farmTick, judgeScenario, scenarioById, startOutage, startScenario, stopPump, tick,
   type Command, type FarmCommand, type FarmState, type ScenarioRun, type SimState, type Verdict,
 } from './sim';
 import { PRESETS, type PresetName } from './render/camera';
@@ -14,7 +14,8 @@ import { mountQuality } from './ui/quality';
 import { mountTools } from './ui/tools';
 import { QuizPanel } from './ui/quiz';
 import { FarmPanel } from './ui/farm';
-import { markSeen, openZukan } from './ui/zukan';
+import { markSeen, markSeenFromLog, openZukan, type Tab } from './ui/zukan';
+import { recordFarm, recordGrow, recordQuiz } from './ui/records';
 import { alarmed, alarmHtml } from './ui/alarm';
 import { Sound, soundsOf } from './ui/sound';
 import { goalHtml, noRecords, openTasks, recordTask, showVerdict, verdictHtml } from './ui/tasks';
@@ -55,7 +56,11 @@ let mode: Mode = 'grow';
 /** 症状診断モード。診断中は栽培を止め、栽培の状態はそのまま残す */
 const quiz = new QuizPanel(() => setMode('grow'));
 /** 経営モード。栽培モードとは別の状態（FarmState）で、モードを切り替えても続きから。月を締めたら時間を止める */
-const farm = new FarmPanel(createFarm({ events: true, seed: newSeed() }), () => setSpeed(0));
+const farm = new FarmPanel(createFarm({ events: true, seed: newSeed() }), l => {
+  setSpeed(0);
+  // 自己ベスト（課題の経営は課題の記録に残すので数えない）
+  if (!task) recordFarm(l.month, totals(l).profit, farm.state.reputation);
+});
 
 /** 道具バーの操作。経営モードでは選んでいる棚に効かせる */
 function send(c: Command) {
@@ -203,6 +208,7 @@ function taskAction(a: string) {
 }
 $('tko').onclick = () => openTasks(startTask, task?.id ?? null);
 quiz.again = () => (task ? startTask(task.id) : quiz.start(Date.now()));
+quiz.onDone = (score, of) => (task ? '' : recordQuiz(score, of));
 $('tg').addEventListener('click', e => {
   const a = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-ta]')?.dataset.ta;
   if (a) taskAction(a);
@@ -246,8 +252,10 @@ let heard: { log: readonly unknown[]; n: number } = { log: [], n: 0 };
 /** 記録の新しい分の音を鳴らす。警報の音は、まだ続いているときだけ（予備ポンプがすぐ切り替えたときは鳴らさない） */
 function hear(log: readonly { kind: string }[], fs: { outage: number; pumpDown: string[] }) {
   if (log !== heard.log) { heard = { log, n: log.length }; return; }
-  const names = soundsOf(log.slice(heard.n) as Parameters<typeof soundsOf>[0]);
+  const fresh = log.slice(heard.n);
   heard.n = log.length;
+  markSeenFromLog(fresh as Parameters<typeof markSeenFromLog>[0]);
+  const names = soundsOf(fresh as Parameters<typeof soundsOf>[0]);
   for (const n of names) if (n !== 'alarm' || fs.outage > 0 || fs.pumpDown.length) sound.play(n);
 }
 
@@ -367,7 +375,8 @@ function loop(now: number) {
     if (s.result && !resultShown) {
       resultShown = true;
       const t = task && taskVerdict ? { html: verdictHtml(scenarioById(task.id), taskVerdict), onAction: taskAction } : undefined;
-      showResult(s.result, s.crop.id, restart, t);
+      // 自由に遊んだ収穫は自己ベストに（課題は課題の記録）
+      showResult(s.result, s.crop.id, restart, t, t ? '' : recordGrow(s.crop.id, s.result));
       if (s.result.outcome === 'harvest') sound.play('harvest');
     }
   } else if (dirty || sinceHud > 0.1) { if (mode === 'farm') farm.update(); updateAlarm(); updateTask(); dirty = false; sinceHud = 0; }
@@ -428,8 +437,8 @@ Object.assign(window, {
     get taskState() { updateTask(); return task && { ...task, verdict: taskVerdict }; },
     /** 課題の一覧を開く */
     tasks() { openTasks(startTask, task?.id ?? null); },
-    /** 図鑑を開く（'crops' / 'symptoms'） */
-    zukan: openZukan,
+    /** 図鑑を開く（'crops'・'symptoms'・'supplies'・'equipment'・'events'・'records'） */
+    zukan(tab?: Tab) { openZukan(tab); },
     quiz,
     /** 効果音（sound.set(true) でオン。確認用） */
     sound,

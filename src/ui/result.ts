@@ -21,12 +21,12 @@ const TITLE: Record<Result['outcome'], (r: Result) => [string, string]> = {
 
 /**
  * 結果を出す。onRestart には次に育てる作物を渡す（「もう一度」は同じ作物、下の段で別の作物）。
- * 課題中は task を渡し、下の段を課題の判定（verdictHtml。ボタンは data-ta）に替える
+ * 課題中は task を渡し、下の段を課題の判定（verdictHtml。ボタンは data-ta）に替える。note は自己ベストの更新など
  */
-export function showResult(r: Result, crop: string, onRestart: (crop: string) => void, task?: { html: string; onAction: (a: string) => void }): void {
+export function showResult(r: Result, crop: string, onRestart: (crop: string) => void, task?: { html: string; onAction: (a: string) => void }, note = ''): void {
   const box = document.getElementById('res')!, [title, sub] = TITLE[r.outcome](r);
   const c = r.costs, yen = (v: number) => `¥${Math.round(v).toLocaleString()}`;
-  document.getElementById('rb')!.innerHTML = `<h2>${title}</h2><div>${sub}</div>${lossHtml(r)}<table>`
+  document.getElementById('rb')!.innerHTML = `<h2>${title}</h2><div>${sub}</div>${note}${lossHtml(r)}<table>`
     + `<tr><td>収量（1トレイ）</td><td>${r.yieldG.toFixed(0)} g</td></tr><tr><td>売上（直売）</td><td>${yen(r.sales)}</td></tr>`
     + `<tr><td>種・培地</td><td>−${yen(c.seed + c.medium)}</td></tr><tr><td>電気代</td><td>−${yen(c.power)}</td></tr>`
     + `<tr><td>包装</td><td>−${yen(c.pack)}</td></tr><tr><td>養液・調整剤</td><td>−${yen(c.supplies)}</td></tr>`
