@@ -7,7 +7,7 @@ import { CROPS, GRADES, type Grade } from './crop';
 import type { ScheduledEvent } from './facility';
 import { createFarm, totals, type FarmState } from './farm';
 import { createQuiz, quizScore, type Quiz } from './quiz';
-import { bedOf, createSim, HYDROPONIC, type SimState } from './sim';
+import { bedOf, createSim, HYDROPONIC, resampleSensors, type SimState } from './sim';
 
 /** 達成条件（書いたものをすべて満たす）。栽培は収穫が前提 */
 export interface ScenarioGoal {
@@ -70,7 +70,10 @@ export function startScenario(id: string, seed = 1): ScenarioRun {
   switch (sc.mode) {
     case 'grow': {
       const sim = createSim({ crop: sc.crop, seed: s, events: sc.events, schedule: sc.schedule });
-      if (sc.initial) fill(bedOf(sim), { ...HYDROPONIC.compartments[0].initial, ...sc.initial });
+      if (sc.initial) {
+        fill(bedOf(sim), { ...HYDROPONIC.compartments[0].initial, ...sc.initial });
+        resampleSensors(sim);
+      }
       return { scenario: id, mode: 'grow', sim };
     }
     case 'quiz':

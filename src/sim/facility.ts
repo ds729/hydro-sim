@@ -19,6 +19,12 @@ export interface FacilitySpec {
   outage: { meanIntervalDays: number; hours: [number, number] };
   /** ポンプの停止（詰まり）：ポンプ1台あたりの平均の間隔（日）。直すまで止まったまま */
   pump: { meanIntervalDays: number };
+  /**
+   * 制御の遅れ（v1.1。栽培モードだけ。mixing.ts）。sim の1歩（1時間）の内側を stepMin 分刻みで回し、
+   * 入れた資材は「混ざっていない分」から時定数 mixTauMin 分（ポンプが止まっていれば mixTauStoppedMin 分）で栽培槽へ移る。
+   * センサは sensorIntervalMin 分ごとにしか読みが変わらない。値はゲーム都合（遅れが1時間の歩みで見え、手で遊べる長さ）
+   */
+  control: { stepMin: number; mixTauMin: number; mixTauStoppedMin: number; sensorIntervalMin: number };
 }
 
 export const FACILITY = facilityJson as unknown as FacilitySpec;

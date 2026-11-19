@@ -9,3 +9,5 @@ export * from './quiz';
 export * from './farm';
 export * from './facility';
 export * from './scenario';
+export * from './mixing';
+export * from './rules';

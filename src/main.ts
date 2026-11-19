@@ -2,8 +2,8 @@
 
 import './ui/style.css';
 import {
-  applyCommand, BUSINESS, totals, createFarm, createSim, CROPS, cropSpec, farmTick, judgeScenario, scenarioById, startOutage, startScenario, stopPump, tick,
-  type Command, type FarmCommand, type FarmState, type ScenarioRun, type SimState, type Verdict,
+  applyCommand, BUSINESS, totals, createFarm, createSim, CROPS, cropSpec, farmTick, judgeScenario, scenarioById, startOutage, setRules, startScenario, stopPump, templateRules, tick,
+  type Command, type Rule, type FarmCommand, type FarmState, type ScenarioRun, type SimState, type Verdict,
 } from './sim';
 import { PRESETS, type PresetName } from './render/camera';
 import { modelStatus } from './render/models';
@@ -431,6 +431,14 @@ Object.assign(window, {
         s.log.push({ hour: s.hour, ...e });
       }
       dirty = true;
+    },
+    /**
+     * 自動制御ルール（v1.1。画面は区切り3）：rules('template') で今の作物のひな形、rules([...]) で任意の行、rules([]) で外す。
+     * 引数なしで今のルールを返す
+     */
+    rules(r?: Rule[] | 'template') {
+      if (r !== undefined) { setRules(s, r === 'template' ? templateRules(s.crop.id) : r); dirty = true; }
+      return s.control.rules;
     },
     /** 課題：task('thin') で始める、task(null) でやめる。taskState で今の課題と判定 */
     task(id: string | null) { if (id) startTask(id); else endTask(); },

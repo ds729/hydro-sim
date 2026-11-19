@@ -1,6 +1,6 @@
 // HUD（左上）：EC・pH・液量のゲージ、生育・健康、推移グラフ、栽培日誌
 
-import { LIGHT, cropSpec, dayOf, diagnose, isLit, powered, type CropSpec, type Factor, type SimEvent, type SimState } from '../sim';
+import { LIGHT, cropSpec, dayOf, isLit, mixing, powered, valuesOf, type CropSpec, type Factor, type SimEvent, type SimState } from '../sim';
 import { journalHtml } from './journal';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -30,9 +30,15 @@ export class Hud {
   }
 
   update(s: SimState): void {
-    const { values } = diagnose(s), spec = cropSpec(s), dy = dayOf(s);
+    // ゲージはセンサの読み。入れた資材がまだ混ざっていなければ、混ざったときの見込みを「→」で添える。
+    // 停電中はセンサ（制御器）も止まり、停電の前の読みのまま（薄く出す）
+    const values = valuesOf(s, 'sensor'), ahead = mixing(s) ? valuesOf(s, 'settled') : null, spec = cropSpec(s), dy = dayOf(s);
+    const stale = !powered(s.facility);
     for (const [k, , lo, hi] of GAUGES) {
-      $('v' + k).textContent = values[k].toFixed(2);
+      const v = values[k].toFixed(2), a = ahead?.[k].toFixed(2), el = $('v' + k);
+      el.innerHTML = a && a !== v ? `${v}<small class="ah">→${a}</small>` : v;
+      el.classList.toggle('stale', stale);
+      el.title = stale ? '停電中：センサが止まり、停電の前の読みのまま' : a && a !== v ? '入れた資材が混ざりきると右の値になる見込み（混ざるまで30分〜1時間ほど）' : 'センサの読み（30分ごと）';
       $('m' + k).style.left = Math.max(0, Math.min(100, ((values[k] - lo) / (hi - lo)) * 100)) + '%';
     }
     const lit = isLit(s.hour), on = powered(s.facility);

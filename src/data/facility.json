@@ -5,16 +5,30 @@
     "darkUptakeRatio": 0.15
   },
   "o2": {
-    "band": [0.05, 0.4, 1.5, 2],
+    "band": [
+      0.05,
+      0.4,
+      1.5,
+      2
+    ],
     "aeratePerH": 0.5,
     "surfacePerH": 0.03,
     "rootPerH": 0.1
   },
   "outage": {
     "meanIntervalDays": 10,
-    "hours": [2, 8]
+    "hours": [
+      2,
+      8
+    ]
   },
   "pump": {
     "meanIntervalDays": 12
+  },
+  "control": {
+    "stepMin": 5,
+    "mixTauMin": 30,
+    "mixTauStoppedMin": 360,
+    "sensorIntervalMin": 30
   }
 }

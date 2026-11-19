@@ -1,10 +1,13 @@
-// シミュレーション本体。固定タイムステップ（1 tick ＝ 1時間）、状態はプレーンなデータ（複製・保存・比較できる）
+// シミュレーション本体。固定タイムステップ（1 tick ＝ 1時間）、状態はプレーンなデータ（複製・保存・比較できる）。
+// 作物・設備は1時間ごとに進め、資材の混合・センサの読み・自動制御ルールの評価（v1.1）だけを内側の短い刻み（facility.json の control.stepMin 分）で回す
 
-import { execute, SUPPLIES, type Command, type DoseSupply } from './commands';
+import { doseEffect, execute, SUPPLIES, type Command, type DoseEffect, type DoseSupply } from './commands';
 import { applyFlows, ecOf, fill, findCompartment, type Compartment, type Flow, type Solution } from './compartment';
 import { CROPS, FACTORS, MEASURE, diurnal, exchange, isLit, fitness, grow, harvestOf, type CropState, type Factor, type Grade } from './crop';
-import { limiting, side } from './fitness';
+import { limiting, side, trapezoid } from './fitness';
 import { BUSINESS, trayCost } from './farm';
+import { CONTROL, mix, mixAll, noEffect, readSensors, type Reading } from './mixing';
+import { createController, dueRules, ruleCommand, type Controller, type Rule } from './rules';
 import { aerate, createFacility, endHour, fixPump, o2Fitness, powered, pumpRunning, rollEvents, watchHypoxia, type FacilityEvent, type FacilityState, type ScheduledEvent } from './facility';
 
 /** 設備の構成。水耕は栽培槽1区画で流れなし */
@@ -23,7 +26,8 @@ export const HYDROPONIC: Setup = {
 
 export type SimEvent =
   | { hour: number; kind: 'start'; crop: string }
-  | { hour: number; kind: 'command'; command: Command }
+  /** 操作。auto は自動制御ルールが動かした操作（rule は行の添字、minute はその刻みの経過時間 分） */
+  | { hour: number; kind: 'command'; command: Command; auto?: true; rule?: number; minute?: number }
   /** 毎朝（24時間ごと）の定点記録 */
   | { hour: number; kind: 'morning'; ec: number; ph: number; water: number; growth: number }
   /**
@@ -65,6 +69,12 @@ export interface SimState {
   /** 電気・ポンプ（停電・ポンプの停止。区画ごとにポンプが1台） */
   facility: FacilityState;
   crop: CropState;
+  /** 入れたがまだ栽培槽に混ざっていない資材（区画ごと。mixing.ts）。全交換で消える */
+  unmixed: Record<string, DoseEffect>;
+  /** 作物を植えた区画のセンサの読み（control.sensorIntervalMin 分ごとに取り直す。画面とルールが見る値。停電中は取れない） */
+  sensor: Reading;
+  /** 自動制御ルール（rules.ts。行がなければ何もしない） */
+  control: Controller;
   /** 資材費の累計 円 */
   cost: number;
   /** 2時間ごとの記録（グラフ用） */
@@ -83,7 +93,7 @@ const WATCH_LOW = 0.7, WATCH_HOURS = 3, WATCH_INTERVAL = 24;
 const WATCH_OK = 0.9;
 
 /** events：停電・ポンプの停止を抽選で起こす（既定は起こさない）。schedule：決まった時刻に起こすイベント（課題用） */
-export function createSim(opts: { crop?: string; seed?: number; setup?: Setup; events?: boolean; schedule?: readonly ScheduledEvent[] } = {}): SimState {
+export function createSim(opts: { crop?: string; seed?: number; setup?: Setup; events?: boolean; schedule?: readonly ScheduledEvent[]; rules?: readonly Rule[] } = {}): SimState {
   const setup = opts.setup ?? HYDROPONIC;
   const compartments = setup.compartments.map(d => {
     const c: Compartment = { id: d.id, capacity: d.capacity, water: 0, solutes: { salts: 0 }, ph: 7, o2: 1 };
@@ -96,6 +106,9 @@ export function createSim(opts: { crop?: string; seed?: number; setup?: Setup; e
     setup, hour: 0, rng: (opts.seed ?? 1) >>> 0, compartments, flows: setup.flows.map(f => ({ ...f })),
     facility: createFacility(opts.events ?? false, opts.schedule),
     crop: { id, compartment: setup.bed, growth: 0, health: 100, qualitySum: 0 },
+    unmixed: Object.fromEntries(compartments.map(c => [c.id, noEffect()])),
+    sensor: readSensors(findCompartment(compartments, setup.bed), 0),
+    control: createController(opts.rules),
     cost: 0, history: [], log: [{ hour: 0, kind: 'start', crop: id }],
     watch: { ec: { low: 0, last: null, okAt: 0 }, ph: { low: 0, last: null, okAt: 0 }, water: { low: 0, last: null, okAt: 0 } },
     loss: {},
@@ -117,6 +130,7 @@ export function tick(s: SimState): void {
   for (const c of s.compartments) aerate(c, pumpRunning(fx, c.id));
   applyFlows(s.compartments, s.flows);
   exchange(s.crop, spec, bed, diurnal(s.hour, power));
+  stepInside(s);
   // 律速：EC・pH・液量のうち最も悪いものと、溶存酸素
   const f = fitness(spec, bed), lim = limiting(FACTORS, f), o2 = o2Fitness(bed), m = Math.min(lim.value, o2);
   // 停電で照明が消えた明期は育たない（夜の停電は照明には響かない）
@@ -148,15 +162,66 @@ export function tick(s: SimState): void {
   else if (s.hour > spec.days * 48) finish(s, 'late');
 }
 
-/** コマンドを実行する。終わった後は受け付けず false を返す */
+/**
+ * 1時間の内側：短い刻みごとに資材を混ぜ、センサの読みを取り直す時刻なら取り直し、自動制御ルールを評価する。
+ * 停電中は制御器（センサの読み・ルール）が止まる。読みは停電の前の値のまま
+ */
+function stepInside(s: SimState): void {
+  const { stepMin, sensorIntervalMin } = CONTROL, bed = bedOf(s), power = powered(s.facility);
+  for (let m = stepMin; m <= 60; m += stepMin) {
+    for (const c of s.compartments) mix(c, s.unmixed[c.id], stepMin, pumpRunning(s.facility, c.id));
+    if (!power) continue;
+    const minute = s.hour * 60 + m;
+    if (minute % sensorIntervalMin === 0) s.sensor = readSensors(bed, minute);
+    for (const i of dueRules(s.control, s.sensor, minute)) run(s, ruleCommand(s.control.rules[i], bed.id), { rule: i, minute });
+  }
+}
+
+/** 自動制御ルールを入れ替える（次に動ける時刻は戻す） */
+export function setRules(s: SimState, rules: readonly Rule[]): void {
+  s.control = createController(rules);
+}
+
+/** 自動制御ルールが動かした操作の回数 */
+export const autoCount = (s: SimState) => s.log.filter(e => e.kind === 'command' && e.auto).length;
+
+/** センサの読みを今の栽培槽の値で取り直す（課題・症状診断の問題で栽培槽を直に作ったとき） */
+export function resampleSensors(s: SimState): void {
+  s.sensor = readSensors(bedOf(s), s.hour * 60);
+}
+
+/** 混ざっていない資材を残らず混ぜ、センサも取り直す（テスト用。画面からは使わない） */
+export function settleNow(s: SimState): void {
+  for (const c of s.compartments) mixAll(c, s.unmixed[c.id]);
+  resampleSensors(s);
+}
+
+/**
+ * コマンドを実行する。終わった後は受け付けず false を返す。
+ * 資材（dose）はすぐには効かず、混ざっていない分に置く（費用はすぐかかる）。全交換はすぐ入れ替わり、混ざっていない分も捨てる
+ */
 export function applyCommand(s: SimState, cmd: Command): boolean {
+  return run(s, cmd, null);
+}
+
+function run(s: SimState, cmd: Command, auto: { rule: number; minute: number } | null): boolean {
   if (s.result) return false;
   const d = s.setup.compartments.find(c => c.id === cmd.target);
   if (!d) throw new Error(`区画 ${cmd.target} がありません`);
   if (cmd.type === 'fixPump') {
     if (!fixPump(s.facility, cmd.target)) return false;
-  } else s.cost += execute(s.compartments, cmd, d.initial);
-  s.log.push({ hour: s.hour, kind: 'command', command: cmd });
+  } else if (cmd.type === 'dose') {
+    const e = doseEffect(cmd), u = s.unmixed[cmd.target], c = findCompartment(s.compartments, cmd.target);
+    // 容量を超える水はあふれる（入れたときに、混ざっていない分も含めて数える）
+    u.water += Math.max(0, Math.min(e.water, c.capacity - c.water - u.water));
+    u.salts += e.salts;
+    u.ph += e.ph;
+    s.cost += SUPPLIES[cmd.supply].pricePerUnit * cmd.amount;
+  } else {
+    s.cost += execute(s.compartments, cmd, d.initial);
+    s.unmixed[cmd.target] = noEffect();
+  }
+  s.log.push(auto ? { hour: s.hour, kind: 'command', command: cmd, auto: true, ...auto } : { hour: s.hour, kind: 'command', command: cmd });
   return true;
 }
 
@@ -199,9 +264,28 @@ export interface Diagnosis {
   worst: { key: Factor; value: number; side: 'low' | 'high' };
 }
 
-export function diagnose(s: SimState): Diagnosis {
-  const spec = cropSpec(s), bed = bedOf(s), f = fitness(spec, bed);
-  const values = { ec: MEASURE.ec(bed), ph: MEASURE.ph(bed), water: MEASURE.water(bed) };
+/**
+ * どの値で見るか。actual＝栽培槽の本当の値（作物が受ける値。見た目の症状）、sensor＝センサの読み（ゲージ・モニタ・ルール）、
+ * settled＝混ざっていない資材が全部混ざったときの見込み（案内が「もう足りた」を決める）
+ */
+export type ValueSource = 'actual' | 'sensor' | 'settled';
+
+export function valuesOf(s: SimState, from: ValueSource = 'actual'): Record<Factor, number> {
+  if (from === 'sensor') return { ec: s.sensor.ec, ph: s.sensor.ph, water: s.sensor.water };
+  let bed = bedOf(s);
+  if (from === 'settled') {
+    bed = { ...bed, solutes: { ...bed.solutes } };
+    mixAll(bed, { ...s.unmixed[bed.id] });
+  }
+  return { ec: MEASURE.ec(bed), ph: MEASURE.ph(bed), water: MEASURE.water(bed) };
+}
+
+/** 混ざっていない資材があるか（画面の「混ざり中」） */
+export const mixing = (s: SimState) => Object.values(s.unmixed).some(u => u.salts || u.water || u.ph);
+
+export function diagnose(s: SimState, from: ValueSource = 'actual'): Diagnosis {
+  const spec = cropSpec(s), values = valuesOf(s, from);
+  const f = Object.fromEntries(FACTORS.map(k => [k, trapezoid(values[k], spec.bands[k])])) as Record<Factor, number>;
   const w = limiting(FACTORS, f);
   return { values, fitness: f, worst: { ...w, side: side(values[w.key], spec.bands[w.key]) } };
 }

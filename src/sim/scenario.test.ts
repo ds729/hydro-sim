@@ -7,10 +7,10 @@ import { farmPlan, farmRun, FERT, fixPumps, keepInBand, PH_DOWN, runToEnd, WATER
 
 /** 課題の「資材を節約」で使う操作：適正帯の端に来てから戻す（pH ダウンの回数を減らす） */
 function keepAtEdge(s: Parameters<typeof keepInBand>[0]) {
-  const b = bedOf(s);
-  if (b.ph > 6.45) applyCommand(s, PH_DOWN);
-  if (b.water < 1.25) applyCommand(s, WATER);
-  if (ecOf(b) < 0.85) applyCommand(s, FERT);
+  const v = s.sensor;
+  if (v.ph > 6.45) applyCommand(s, PH_DOWN);
+  if (v.water < 1.25) applyCommand(s, WATER);
+  if (v.ec < 0.85) applyCommand(s, FERT);
 }
 
 /** 課題を「帯に保つ操作」で最後まで遊ぶ（栽培は帯に保ってポンプを直す。資材を節約する課題は帯の端で戻す、診断は全問正解、経営は契約から逆算して播く） */

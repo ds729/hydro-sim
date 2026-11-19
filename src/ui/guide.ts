@@ -1,7 +1,7 @@
 // 初回の案内（課題「はじめての収穫」）：吹き出しで次の操作を示し、押すボタンとゲージを光らせる。
 // どの操作を案内するかは sim の値と作物の適正帯から決める（guideIssue。純粋な関数なので Vitest で検査する）
 
-import { cropSpec, diagnose, type Factor, type SimState } from '../sim';
+import { cropSpec, valuesOf, type Factor, type SimState } from '../sim';
 
 /** 案内する困りごと（要因と向き）と、押すボタン（道具バーのキー。null は「待つ」） */
 export interface Issue { factor: Factor; side: 'low' | 'high'; key: string | null }
@@ -13,9 +13,12 @@ const ORDER: [Factor, 'low' | 'high', string | null][] = [
   ['ec', 'low', '1'], ['ph', 'high', '3'], ['water', 'low', '2'], ['ec', 'high', '2'], ['ph', 'low', '4'], ['water', 'high', null],
 ];
 
-/** 帯の端からの位置（0＝適正帯の下端、1＝上端） */
+/**
+ * 帯の端からの位置（0＝適正帯の下端、1＝上端）。値は入れた資材が混ざりきったときの見込み
+ * （資材は遅れて効くので、ゲージの読みで決めると、止めている間に押した分が「まだ足りない」に見えて入れすぎる）
+ */
 function pos(s: SimState, k: Factor): number {
-  const b = cropSpec(s).bands[k], v = diagnose(s).values[k];
+  const b = cropSpec(s).bands[k], v = valuesOf(s, 'settled')[k];
   return (v - b[1]) / (b[2] - b[1]);
 }
 

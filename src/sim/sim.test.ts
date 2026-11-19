@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { applyCommand, bedOf, BUSINESS, createSim, CROPS, cropSpec, diagnose, ecOf, mulberry32, tick, trayCost, trayEstimate, type Command, type SimState } from './index';
+import { applyCommand, bedOf, BUSINESS, createSim, CROPS, cropSpec, diagnose, ecOf, mulberry32, settleNow, tick, trayCost, trayEstimate, type Command, type SimState } from './index';
 import { keepInBand, runToEnd } from './testplay';
 
 const fert: Command = { type: 'dose', target: 'bed', supply: 'fertilizer', amount: 10 };
@@ -85,6 +85,7 @@ describe('roadmap Phase 1 の完了条件', () => {
   test('pH 9 まで上げると枯死する', () => {
     const s = createSim();
     for (let i = 0; i < 10; i++) applyCommand(s, phUp);
+    settleNow(s);
     expect(bedOf(s).ph).toBe(9);
     expect(runToEnd(s).outcome).toBe('dead');
   });
@@ -105,8 +106,10 @@ describe('コマンド', () => {
   test('資材の効果と費用', () => {
     const s = createSim(), b = bedOf(s);
     applyCommand(s, fert);
+    settleNow(s);
     expect(ecOf(b)).toBeCloseTo(1.35);
     applyCommand(s, water);
+    settleNow(s);
     expect(b.water).toBeCloseTo(2.2);
     expect(s.cost).toBeCloseTo(1);
     expect(s.log.at(-1)).toEqual({ hour: 0, kind: 'command', command: water });
@@ -115,6 +118,7 @@ describe('コマンド', () => {
   test('液量は容量、pH は 3〜9 で頭打ち', () => {
     const s = createSim(), b = bedOf(s);
     for (let i = 0; i < 20; i++) { applyCommand(s, water); applyCommand(s, phDown); }
+    settleNow(s);
     expect(b.water).toBe(3);
     expect(b.ph).toBe(3);
   });
@@ -163,12 +167,12 @@ describe('記録', () => {
     expect(a).toMatchObject({ factor: 'ph', side: 'high', driver: null });
     expect(a.hour).toBeGreaterThan(24);
 
-    // 外れたままなら、24 時間後のメモも同じ操作を原因にする
+    // 外れたままなら、24 時間後のメモも同じ操作を原因にする（入れた肥料は1時間目のうちに混ざって外れ、3時間続いた4時にメモ）
     const v = createSim();
     for (let i = 0; i < 8; i++) applyCommand(v, fert);
     for (let i = 0; i < 30; i++) tick(v);
     expect(v.log.filter(e => e.kind === 'advice' && e.factor === 'ec').map(e => e.kind === 'advice' && [e.hour, e.driver]))
-      .toEqual([[3, 'fertilizer'], [27, 'fertilizer']]);
+      .toEqual([[4, 'fertilizer'], [28, 'fertilizer']]);
 
     // 全交換より前の操作は原因にしない
     const u = createSim();

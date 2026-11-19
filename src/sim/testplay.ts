@@ -1,9 +1,8 @@
 // テスト用の操作（自動制御ルールモードと同じく、コマンドだけで sim を動かす）。sim.test・farm.test・scenario.test で共用する。
 // 画面からは使わない（index.ts から出さない）
 
-import { applyCommand, bedOf, cropSpec, tick, type SimState } from './sim';
+import { applyCommand, cropSpec, tick, type SimState } from './sim';
 import { CROPS, type Factor } from './crop';
-import { ecOf } from './compartment';
 import { applyFarmCommand, farmTick, rackValues, BUSINESS, type FarmState } from './farm';
 import type { Command } from './commands';
 
@@ -14,14 +13,17 @@ export const FERT = dose('fertilizer', 10), WATER = dose('water', 0.2), PH_DOWN 
 /** 帯の内側 ratio 割より中の範囲 */
 const inner = (band: readonly number[], ratio = 0.2) => [band[1] + (band[2] - band[1]) * ratio, band[2] - (band[2] - band[1]) * ratio];
 
-/** 栽培：作物の適正帯から作る制御。各要因を適正帯の内側 2 割より中に保つ（どの作物でも同じ規則） */
+/**
+ * 栽培：作物の適正帯から作る制御。各要因を適正帯の内側 2 割より中に保つ（どの作物でも同じ規則）。
+ * 人と同じくゲージ（センサの読み）を見て、1時間に1回だけ押す（入れた分は遅れて効く）
+ */
 export function keepInBand(s: SimState) {
-  const b = bedOf(s), { ec, ph, water: w } = cropSpec(s).bands;
+  const v = s.sensor, { ec, ph, water: w } = cropSpec(s).bands;
   const [ecLo, ecHi] = inner(ec), [phLo, phHi] = inner(ph), [wLo, wHi] = inner(w);
-  if (b.ph > phHi) applyCommand(s, PH_DOWN);
-  if (b.ph < phLo) applyCommand(s, PH_UP);
-  if (b.water < wLo || (ecOf(b) > ecHi && b.water < wHi)) applyCommand(s, WATER);
-  if (ecOf(b) < ecLo) applyCommand(s, FERT);
+  if (v.ph > phHi) applyCommand(s, PH_DOWN);
+  if (v.ph < phLo) applyCommand(s, PH_UP);
+  if (v.water < wLo || (v.ec > ecHi && v.water < wHi)) applyCommand(s, WATER);
+  if (v.ec < ecLo) applyCommand(s, FERT);
 }
 
 /** 栽培：止まったポンプをすぐ直す */

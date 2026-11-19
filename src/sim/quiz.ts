@@ -1,7 +1,7 @@
 // 症状診断モード：1つの要因だけが適正帯を外れた栽培槽を作り、見た目から原因を当てる。文言は持たない（ui 側が symptoms.json から作る）
 
 import { CROPS, FACTORS, type Factor } from './crop';
-import { bedOf, createSim, type SimState } from './sim';
+import { bedOf, createSim, resampleSensors, type SimState } from './sim';
 import { mulberry32 } from './rng';
 
 export interface Cause { factor: Factor; side: 'low' | 'high' }
@@ -59,6 +59,7 @@ export function questionSim(q: Question): SimState {
   bed.solutes.salts = v.ec * v.water;
   bed.ph = v.ph;
   Object.assign(s.crop, { growth: q.growth, health: q.health });
+  resampleSensors(s);
   return s;
 }
 

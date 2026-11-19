@@ -513,7 +513,8 @@ export class Diorama {
     this.roots.instanceMatrix.needsUpdate = true;
     this.roots.instanceColor!.needsUpdate = true;
     this.bubbles.instanceMatrix.needsUpdate = true;
-    this.panel(s, dg, t, blind, clock, pw);
+    // 制御盤のランプとモニタはセンサの読み（苗の見た目は本当の値）
+    this.panel(s, diagnose(s, 'sensor'), t, blind, clock, pw);
   }
 
   /**
@@ -544,7 +545,7 @@ export class Diorama {
     });
     this.fx.update(dt);
     this.setClock(clock, pw.on);
-    this.panel(mon, diagnose(mon), t, blind, clock, pw);
+    this.panel(mon, diagnose(mon, 'sensor'), t, blind, clock, pw);
   }
 
   /** 前のフレームからの秒（初回・タブを戻したときは小さく）。モードが変わったらパーティクルを消し、記録の見始めを今にする */

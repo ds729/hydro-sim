@@ -2,7 +2,7 @@
 // 帳簿（設備・月次損益・1トレイの見込み）は図鑑と同じ重ねた窓に出す。文言はここで作り、sim はイベントと数値だけを出す
 
 import {
-  BUSINESS, CROPS, applyFarmCommand, canBuy, contractById, contractsOf, createSim, farmDay, freshness, isLit, powered, rackValues, reserved, totals, trayEstimate,
+  BUSINESS, CROPS, applyFarmCommand, canBuy, contractById, contractsOf, createSim, farmDay, freshness, isLit, powered, rackValues, resampleSensors, reserved, totals, trayEstimate,
   type Band, type Contract, type EquipmentId, type Factor, type FarmCommand, type FarmState, type Ledger, type ShortCause,
   type SimState, type Tray,
 } from '../sim';
@@ -264,6 +264,7 @@ export class FarmPanel {
       Object.assign(s.crop, { growth: t.crop.growth, health: t.crop.health });
       s.hour = f.hour - t.sownAt;
     } else s.crop.growth = 0;
+    resampleSensors(s);
     return s;
   }
 }
