@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { LIGHT, bedOf, cropSpec, diagnose, mulberry32, o2Fitness, powered, pumpRunning, rackValues, type CropSpec, type Diagnosis, type FarmState, type SimState } from '../sim';
+import { LIGHT, RULE_LIMIT, bedOf, cropSpec, diagnose, mulberry32, o2Fitness, powered, pumpRunning, rackValues, type CropSpec, type Diagnosis, type FarmState, type SimState } from '../sim';
 import { bakedShadow, boxSet, Builder, LED, mat, SLAB, type BoxSpec } from './build';
 import { loadModel } from './models';
 import { Monitor, type Blind } from './monitor';
@@ -73,6 +73,14 @@ const TINT_DELAY = 0.8, TINT_FOR = 1.6;
 /** ポンプの運転ランプの色（運転・停止） */
 const PUMP_OK = 0x5fe09a, PUMP_NG = 0xff4040;
 type Lamp = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+/**
+ * 自動制御ルールのランプ（制御盤の扉の非常停止の下に横1列、行1〜6。制御盤の座標）。
+ * 行なし・停電は消灯、無効の行は灰、有効は暗い緑、動いた直後（RULE_FLASH 秒）は橙
+ */
+const RULE_LAMP = { x: 0.3, y: 0.8, z0: -0.3, dz: 0.12 } as const;
+const RULE_OFF = new THREE.Color(0x2b3138), RULE_IDLE = new THREE.Color(0x2f7a52), RULE_DISABLED = new THREE.Color(0x6a7078), RULE_FIRE = new THREE.Color(0xffa62b);
+const RULE_PLATE = new THREE.Color(0x1d2228);
+export const RULE_FLASH = 0.8;
 
 export class Diorama {
   readonly scene = new THREE.Scene();
@@ -87,6 +95,9 @@ export class Diorama {
   /** 状態ランプとポンプの運転ランプ（.glb の読み込み後に入る） */
   private lamps: Lamp[] = [];
   private pumpLed?: Lamp;
+  /** 自動制御ルールのランプ（台1枚＋行ごと。1回の描画）と、行ごとに最後に動いた時刻（秒） */
+  private ruleLamps?: THREE.InstancedMesh;
+  private ruleFlash: number[] = [];
   /** 栽培槽（ガラス槽・浮きトレイ・苗・センサ）とセンサケーブル。経営モードでは隠して棚を出す */
   private tank!: THREE.Group;
   private cables: THREE.Object3D[] = [];
@@ -331,6 +342,7 @@ export class Diorama {
       m.position.set(-4.15, 0, 0.6);
       // 状態ランプ（上から EC・pH・液量）
       this.lamps = ['lamp_ec', 'lamp_ph', 'lamp_wt'].map(n => lamp(m, n));
+      m.add((this.ruleLamps = ruleLamps()));
       sc.add(m);
     }, e => console.error(e));
     loadModel('nutrient_tank').then(m => {
@@ -501,9 +513,10 @@ export class Diorama {
     }
     // 資材は養液タンクの点検口に入れ、ポンプが回っていれば少し遅れてその色の養液が吐出口から出てくる
     const dt = this.step(t, 'grow', s.log);
-    for (const { cmd } of this.newDoses(s.log)) {
+    for (const { cmd, auto, rule } of this.newDoses(s.log)) {
       const color = this.doseColor(cmd), all = cmd.type === 'replaceSolution';
-      this.fx.dose(color, PORT[0], PORT_DROP, PORT[1], PORT_LID, all ? 36 : 10, all ? 0.18 : 0.06);
+      if (rule !== undefined) this.ruleFlash[rule] = t;
+      this.fx.dose(color, PORT[0], PORT_DROP, PORT[1], PORT_LID, all ? 36 : auto ? 4 : 10, all ? 0.18 : 0.06);
       if (!all && cmd.supply !== 'water') this.tint = { from: t + TINT_DELAY, to: t + TINT_DELAY + TINT_FOR, color };
     }
     // ポンプの水流（吐出口が水の中にあるときだけ）
@@ -557,11 +570,14 @@ export class Diorama {
   }
 
   /** 記録に新しく入った養液の操作（資材・全交換）を返す。記録が別のもの（始め直し・別の sim）なら今から見る */
-  private newDoses<E extends { kind: string }>(log: readonly E[]): { cmd: { type: string; target: string; supply?: string }; auto?: boolean }[] {
-    if (log !== this.seen.log) { this.seen = { log, n: log.length }; return []; }
-    const out = log.slice(this.seen.n).filter(e => e.kind === 'command') as unknown as { command: { type: string; target: string; supply?: string }; auto?: boolean }[];
+  private newDoses<E extends { kind: string }>(log: readonly E[]): { cmd: { type: string; target: string; supply?: string }; auto?: boolean; rule?: number }[] {
+    if (log !== this.seen.log) { this.seen = { log, n: log.length }; this.ruleFlash = []; return []; }
+    const out = log.slice(this.seen.n).filter(e => e.kind === 'command') as unknown as { command: { type: string; target: string; supply?: string }; auto?: boolean; rule?: number }[];
     this.seen.n = log.length;
-    return out.filter(e => e.command.type === 'dose' || e.command.type === 'replaceSolution').map(e => ({ cmd: e.command, auto: e.auto }));
+    // 自動の操作が1フレームに何十回あっても、しずくは行ごとに1回分
+    const seenRule = new Set<number>();
+    return out.filter(e => (e.command.type === 'dose' || e.command.type === 'replaceSolution') && (e.rule === undefined || !seenRule.has(e.rule) && !!seenRule.add(e.rule)))
+      .map(e => ({ cmd: e.command, auto: e.auto, rule: e.rule }));
   }
 
   private doseColor(c: { type: string; supply?: string }) {
@@ -614,13 +630,43 @@ export class Diorama {
       else { m.color.setHex(LAMP_OFF); m.emissiveIntensity = 0; }
       m.emissive.copy(m.color);
     }
+    // 自動制御ルールの行ごとの状態（0＝行なし・1＝無効・2＝有効・3＝動いた直後）。停電・伏せているときは消す
+    const rs = Array.from({ length: RULE_LIMIT }, (_, i) => {
+      const r = s.control.rules[i];
+      return !r || blind || !pw.on ? 0 : !r.on ? 1 : t - (this.ruleFlash[i] ?? -9) < RULE_FLASH ? 3 : 2;
+    });
+    if (this.ruleLamps) {
+      rs.forEach((v, i) => this.ruleLamps!.setColorAt(i + 1, [RULE_OFF, RULE_DISABLED, RULE_IDLE, RULE_FIRE][v]));
+      this.ruleLamps.instanceColor!.needsUpdate = true;
+    }
     const alert = pw.pumpDown ? 'ポンプ停止：養液が循環していない' : null;
-    const screen = `${pw.on}:${blind}:${alert}`;
-    if (t - this.monitorAt > 0.4 || screen !== this.screen) {
+    const screen = `${pw.on}:${blind}:${alert}:${rs.join('')}`;
+    // 表示が変わったら（ランプの点滅で頻繁に変わるので 0.1秒はあけて）描き直す
+    if (t - this.monitorAt > 0.4 || (screen !== this.screen && t - this.monitorAt > 0.1)) {
       this.monitorAt = t;
       this.screen = screen;
       if (!pw.on) this.monitor.drawOff();
-      else if (blind) this.monitor.drawBlind(blind, alert); else this.monitor.draw(s, dg, clock, alert);
+      else if (blind) this.monitor.drawBlind(blind, alert); else this.monitor.draw(s, dg, clock, alert, rs);
     }
   }
+}
+
+/** 自動制御ルールのランプ：0 番は台（黒い板）、1〜RULE_LIMIT 番が行のランプ。制御盤の .glb の子にする */
+function ruleLamps(): THREE.InstancedMesh {
+  const m = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ toneMapped: false }), RULE_LIMIT + 1);
+  const du = new THREE.Object3D(), { x, y, z0, dz } = RULE_LAMP;
+  du.position.set(x - 0.008, y, z0 + (dz * (RULE_LIMIT - 1)) / 2);
+  du.scale.set(0.012, 0.09, dz * RULE_LIMIT + 0.04);
+  du.updateMatrix();
+  m.setMatrixAt(0, du.matrix);
+  m.setColorAt(0, RULE_PLATE);
+  for (let i = 0; i < RULE_LIMIT; i++) {
+    du.position.set(x, y, z0 + dz * i);
+    du.scale.set(0.02, 0.045, 0.07);
+    du.updateMatrix();
+    m.setMatrixAt(i + 1, du.matrix);
+    m.setColorAt(i + 1, RULE_OFF);
+  }
+  m.castShadow = false;
+  return m;
 }

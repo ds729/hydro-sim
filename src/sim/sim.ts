@@ -73,6 +73,8 @@ export interface SimState {
   unmixed: Record<string, DoseEffect>;
   /** 作物を植えた区画のセンサの読み（control.sensorIntervalMin 分ごとに取り直す。画面とルールが見る値。停電中は取れない） */
   sensor: Reading;
+  /** センサの読みの推移（直近 TRACE_HOURS 時間。取り直すたびに足す）。2時間ごとの history では短い周期の行き過ぎ・ハンチングが見えないため */
+  trace: Reading[];
   /** 自動制御ルール（rules.ts。行がなければ何もしない） */
   control: Controller;
   /** 資材費の累計 円 */
@@ -86,6 +88,9 @@ export interface SimState {
   loss: Record<string, number>;
   result: Result | null;
 }
+
+/** センサの読みの推移を残す時間（h） */
+export const TRACE_HOURS = 24;
 
 /** 適合度 0.7 未満がこの時間続いたら観察メモを出す。同じ要因は 24 時間あける */
 const WATCH_LOW = 0.7, WATCH_HOURS = 3, WATCH_INTERVAL = 24;
@@ -108,6 +113,7 @@ export function createSim(opts: { crop?: string; seed?: number; setup?: Setup; e
     crop: { id, compartment: setup.bed, growth: 0, health: 100, qualitySum: 0 },
     unmixed: Object.fromEntries(compartments.map(c => [c.id, noEffect()])),
     sensor: readSensors(findCompartment(compartments, setup.bed), 0),
+    trace: [readSensors(findCompartment(compartments, setup.bed), 0)],
     control: createController(opts.rules),
     cost: 0, history: [], log: [{ hour: 0, kind: 'start', crop: id }],
     watch: { ec: { low: 0, last: null, okAt: 0 }, ph: { low: 0, last: null, okAt: 0 }, water: { low: 0, last: null, okAt: 0 } },
@@ -172,9 +178,19 @@ function stepInside(s: SimState): void {
     for (const c of s.compartments) mix(c, s.unmixed[c.id], stepMin, pumpRunning(s.facility, c.id));
     if (!power) continue;
     const minute = s.hour * 60 + m;
-    if (minute % sensorIntervalMin === 0) s.sensor = readSensors(bed, minute);
+    if (minute % sensorIntervalMin === 0) record(s, readSensors(bed, minute));
     for (const i of dueRules(s.control, s.sensor, minute)) run(s, ruleCommand(s.control.rules[i], bed.id), { rule: i, minute });
   }
+}
+
+/** センサの読みを取り直し、推移に足す（直近 TRACE_HOURS 時間だけ残す） */
+function record(s: SimState, r: Reading): void {
+  s.sensor = r;
+  s.trace.push(r);
+  const from = r.minute - TRACE_HOURS * 60;
+  let i = 0;
+  while (i < s.trace.length && s.trace[i].minute < from) i++;
+  if (i) s.trace.splice(0, i);
 }
 
 /** 自動制御ルールを入れ替える（次に動ける時刻は戻す） */
@@ -187,7 +203,8 @@ export const autoCount = (s: SimState) => s.log.filter(e => e.kind === 'command'
 
 /** センサの読みを今の栽培槽の値で取り直す（課題・症状診断の問題で栽培槽を直に作ったとき） */
 export function resampleSensors(s: SimState): void {
-  s.sensor = readSensors(bedOf(s), s.hour * 60);
+  s.trace = [];
+  record(s, readSensors(bedOf(s), s.hour * 60));
 }
 
 /** 混ざっていない資材を残らず混ぜ、センサも取り直す（テスト用。画面からは使わない） */

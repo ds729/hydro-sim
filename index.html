@@ -13,16 +13,18 @@
     <div class="hd"><b id="day"></b><span id="cn"></span><b id="qh"></b><b id="fd"></b><button id="mb" aria-expanded="false" title="モード・作物・時間・カメラ・日誌を開く">☰ 時間・日誌</button></div>
     <div id="tg"></div>
     <div id="al"></div>
+    <div id="au"></div>
     <div id="qz"></div>
     <div id="fh"><div class="fc"><span id="fmo"></span><b id="fcash"></b></div><div id="frk" class="g3"></div><div id="fg"></div><div class="fm2"><small id="fat"></small><button id="fms" title="ペン型の計器で今の EC・pH・液量を測る（作業 2分）">🔍 測る</button></div><div id="ftr"></div><div id="fdi"></div><div id="fda"></div></div>
     <div id="gs"></div>
     <div id="gh"><div class="row">生育<div class="bar"><i id="gb"></i></div></div><div class="row">健康<div class="bar"><i id="hb"></i></div></div></div>
+    <div id="chv"><button data-v="all" class="on">全期間</button><button data-v="day">直近24時間</button></div>
     <canvas id="ch" width="230" height="64" style="width:100%;height:64px"></canvas>
-    <small class="ln">緑＝EC　青＝pH　橙＝液量　灰の帯＝夜（照明 消灯）<br>※簡略化したモデルです。数値の確かさは 📗 図鑑の札（確認済み・推定など）で示しています。実際の栽培は地域の試験場などの資料で確かめてください。</small>
+    <small class="ln">緑＝EC　青＝pH　橙＝液量　灰の帯＝夜（照明 消灯）　破線＝ルールのしきい値　下の印＝自動の操作（上の印＝手の操作）<br>※簡略化したモデルです。数値の確かさは 📗 図鑑の札（確認済み・推定など）で示しています。実際の栽培は地域の試験場などの資料で確かめてください。</small>
     <small class="sn">※簡略化したモデル。数値の確かさは図鑑に</small>
   </div>
   <div id="side">
-    <div class="pn" id="act"><h3>モード</h3><div id="md" class="g"></div><div class="g" style="margin-top:4px"><button id="tko">🎯 課題</button><button id="zo">📗 図鑑</button></div><div class="gm gc"><h3>作物</h3><div id="cr" class="g"></div><h3>イベント（停電・ポンプの停止）</h3><div id="ev" class="g"></div></div><div class="gm"><h3>時間</h3><div id="sp"></div></div><h3>音</h3><div id="snd" class="g"></div><h3>カメラ</h3><div id="cm"></div><h3>画質 <span id="fps"></span></h3><div id="qa"></div></div>
+    <div class="pn" id="act"><h3>モード</h3><div id="md" class="g"></div><div class="g" style="margin-top:4px"><button id="tko">🎯 課題</button><button id="zo">📗 図鑑</button></div><div class="gm gc"><h3>作物</h3><div id="cr" class="g"></div><h3>イベント（停電・ポンプの停止）</h3><div id="ev" class="g"></div><h3>自動制御</h3><button id="ruo" style="width:100%" title="センサの読みで資材を入れるルールを組んで、放置で回す">⚙ ルールを組む</button></div><div class="gm"><h3>時間</h3><div id="sp"></div></div><h3>音</h3><div id="snd" class="g"></div><h3>カメラ</h3><div id="cm"></div><h3>画質 <span id="fps"></span></h3><div id="qa"></div></div>
     <div class="pn fo" id="fl"><h3>📒 経営</h3><div id="fsum"></div><button id="fbk" style="width:100%;margin:4px 0 0">帳簿（損益・見込み・設備）</button><h3>在庫</h3><div id="fst"></div><h3>契約 <span id="frp"></span></h3><div id="fct"></div><h3>記録</h3><div id="flg"></div></div>
     <div class="pn gm gc" id="log"><h3>📖 栽培日誌</h3><div id="jl"></div></div>
   </div>
@@ -32,6 +34,7 @@
   <div id="zk"><div class="pn" id="zp"></div></div>
   <div id="bk"><div class="pn" id="bp"></div></div>
   <div id="ts"><div class="pn" id="tsp"></div></div>
+  <div id="ru"><div class="pn" id="rup"></div></div>
 </div>
 <script type="module" src="/src/main.ts"></script>
 </body>

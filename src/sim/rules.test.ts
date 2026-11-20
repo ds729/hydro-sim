@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  autoCount, bangBangRules, cleanRules, CONTROL, createController, createSim, CROPS, dueRules, setRules, templateRules, tick,
+  autoCount, bangBangRules, cleanRules, CONTROL, createController, createSim, CROPS, dueRules, resampleSensors, setRules, templateRules, tick, TRACE_HOURS,
   type Rule, type SimState,
 } from './index';
 import { fixPumps, runToEnd } from './testplay';
@@ -106,5 +106,26 @@ describe('自動制御ルール（v1.1 区切り2）', () => {
       expect(s.log.some(e => e.kind === 'pumpStop' || e.kind === 'outage'), `${crop} ${seed}`).toBe(true);
       expect(r.grade, `${crop} ${seed}`).toBe('S');
     }
+  });
+});
+
+describe('センサの読みの推移（trace）', () => {
+  test('直近24時間だけ残し、2時間ごとの記録では見えないハンチングが見える', () => {
+    const s = createSim({ crop: 'radish', rules: bangBangRules('radish') });
+    for (let h = 0; h < 72; h++) tick(s);
+    expect(s.trace.length).toBeGreaterThan(40);
+    expect(s.trace.length).toBeLessThanOrEqual(49);
+    expect(s.trace[0].minute).toBeGreaterThanOrEqual(s.hour * 60 - TRACE_HOURS * 60);
+    const range = (xs: number[]) => Math.max(...xs) - Math.min(...xs);
+    // 悪い例は pH が 2時間の周期で上下する：30分ごとの読みでは振れ幅が大きく、2時間ごとの記録では同じ位相ばかり拾って小さく見える
+    expect(range(s.trace.map(r => r.ph))).toBeGreaterThan(0.8);
+    expect(range(s.history.slice(-12).map(r => r.ph))).toBeLessThan(0.3);
+  });
+
+  test('センサを取り直すと推移はその1点から', () => {
+    const s = createSim({ crop: 'radish' });
+    for (let h = 0; h < 5; h++) tick(s);
+    resampleSensors(s);
+    expect(s.trace).toHaveLength(1);
   });
 });

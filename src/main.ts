@@ -20,6 +20,7 @@ import { alarmed, alarmHtml } from './ui/alarm';
 import { Sound, soundsOf } from './ui/sound';
 import { goalHtml, noRecords, openTasks, recordTask, showVerdict, verdictHtml } from './ui/tasks';
 import { Guide } from './ui/guide';
+import { RulePanel, activeRules, loadRuleSet } from './ui/rules';
 
 const $ = (id: string) => document.getElementById(id)!;
 const app = $('app'), menu = $('mb');
@@ -35,7 +36,7 @@ try { growEvents = localStorage.getItem(EVENTS_KEY) === '1'; } catch { /* 保存
 /** イベントの乱数のシード（画面では毎回変える。同じ日に同じことが起きないように） */
 const newSeed = () => (Math.random() * 2 ** 32) >>> 0;
 
-let s: SimState = createSim({ events: growEvents, seed: newSeed() });
+let s: SimState = createSim({ events: growEvents, seed: newSeed(), rules: activeRules(loadRuleSet()) });
 /** 1秒あたりに進める時間（h） */
 let speed = 4;
 /** HUD を描き直す必要があるか */
@@ -109,7 +110,7 @@ function setSim(next: SimState) {
 /** 始め直す。作物を省くと今の作物のまま。課題中なら課題をやめる */
 function restart(crop = s.crop.id) {
   if (task) endTask();
-  setSim(createSim({ crop, events: growEvents, seed: newSeed() }));
+  setSim(createSim({ crop, events: growEvents, seed: newSeed(), rules: activeRules(rules.set) }));
 }
 
 // 作物の選択（☰ の中）。育てている途中で変えるときは確かめる
@@ -146,6 +147,15 @@ const evBtns = ([[false, 'なし'], [true, 'あり']] as const).map(([v, label])
   $('ev').appendChild(b);
   return [v, b] as const;
 });
+
+// 自動制御（栽培モードの ☰ と HUD の「⚙ 自動運転中」）。ルールはこのブラウザに保存し、課題の途中は使えない
+const rules = new RulePanel({
+  sim: () => s,
+  locked: () => !!task && scenarioById(task.id).mode === 'grow',
+  apply: r => { setRules(s, r); dirty = true; },
+});
+$('ruo').onclick = () => { rules.open(); if (app.classList.contains('so')) menu.click(); };
+$('au').addEventListener('click', e => { if ((e.target as HTMLElement).closest('button[data-ru]')) rules.open(); });
 
 // ---- 課題（☰ の「課題」）。課題の栽培・経営は別の状態で遊び、やめたら課題の前の続きに戻す ----
 
@@ -371,7 +381,7 @@ function loop(now: number) {
   if (mode === 'grow') hear(s.log, s.facility); else if (mode === 'farm') hear(farm.state.log, farm.state.facility);
   sinceHud += dt;
   if (mode === 'grow') {
-    if (dirty || sinceHud > 0.1) { hud.update(s); updateAlarm(); updateTask(); dirty = false; sinceHud = 0; }
+    if (dirty || sinceHud > 0.1) { hud.update(s); updateAlarm(); updateTask(); rules.refresh(); dirty = false; sinceHud = 0; }
     if (s.result && !resultShown) {
       resultShown = true;
       const t = task && taskVerdict ? { html: verdictHtml(scenarioById(task.id), taskVerdict), onAction: taskAction } : undefined;
@@ -433,13 +443,16 @@ Object.assign(window, {
       dirty = true;
     },
     /**
-     * 自動制御ルール（v1.1。画面は区切り3）：rules('template') で今の作物のひな形、rules([...]) で任意の行、rules([]) で外す。
+     * 自動制御ルール（v1.1）：rules('template') で今の作物のひな形、rules([...]) で任意の行、rules([]) で外す（保存しない。画面は ☰ の ⚙）。
      * 引数なしで今のルールを返す
      */
     rules(r?: Rule[] | 'template') {
       if (r !== undefined) { setRules(s, r === 'template' ? templateRules(s.crop.id) : r); dirty = true; }
       return s.control.rules;
     },
+    /** 自動制御の窓（rulePanel.open()）と推移グラフの期間（chartView('day')） */
+    rulePanel: rules,
+    chartView(v: 'all' | 'day') { hud.setView(v); dirty = true; },
     /** 課題：task('thin') で始める、task(null) でやめる。taskState で今の課題と判定 */
     task(id: string | null) { if (id) startTask(id); else endTask(); },
     get taskState() { updateTask(); return task && { ...task, verdict: taskVerdict }; },

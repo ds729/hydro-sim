@@ -2,6 +2,7 @@
 
 import { CROPS, HYDROPONIC, SUPPLIES, type Command, type CropSpec, type DoseSupply, type Factor, type SimEvent } from '../sim';
 import { SYMPTOMS, symptomOf } from './symptoms';
+import { doseText, isAuto, minuteText } from './rules';
 
 const DOSE: Record<DoseSupply, (amount: number) => string> = {
   fertilizer: a => `肥料を${a}mL追加（ECが上がります）`,
@@ -74,9 +75,36 @@ export const eventStyle = (e: SimEvent): [string, string] =>
 export const JOURNAL_SIZE = 12;
 
 export function journalHtml(log: readonly SimEvent[], spec: CropSpec): string {
-  return log.slice(-JOURNAL_SIZE).reverse().map(e => {
+  const out: string[] = [];
+  for (let i = log.length - 1; i >= 0 && out.length < JOURNAL_SIZE; i--) {
+    const e = log[i];
+    // 続けて起きた自動の操作は1件にまとめる（悪い設定では数千回になり、観察メモが押し出されるため）
+    if (isAuto(e)) {
+      let j = i;
+      while (j > 0 && isAuto(log[j - 1])) j--;
+      out.push(autoHtml(log.slice(j, i + 1) as Extract<SimEvent, { kind: 'command' }>[]));
+      i = j;
+      continue;
+    }
     const [cls, icon] = eventStyle(e);
     const body = e.kind === 'advice' ? adviceHtml(e, spec) : e.kind === 'hypoxia' ? hypoxiaHtml(e) : `${icon} ${eventText(e)}`;
-    return `<div class="jn ${cls}"><small style="margin:0">${timeText(e.hour)}</small>${body}</div>`;
-  }).join('');
+    out.push(`<div class="jn ${cls}"><small style="margin:0">${timeText(e.hour)}</small>${body}</div>`);
+  }
+  return out.join('');
+}
+
+/** 自動制御ルールの操作（続けて起きた分をまとめる）：時刻・回数・資材ごとの合計・動いた行 */
+function autoHtml(es: Extract<SimEvent, { kind: 'command' }>[]): string {
+  const first = es[0], last = es.at(-1)!, rows = [...new Set(es.map(e => e.rule! + 1))].sort((a, b) => a - b);
+  // 同じ日なら終わりの時刻だけ（Day 2 06:05〜14:25）
+  const a = minuteText(first.minute!), b = minuteText(last.minute!), sameDay = a.split(' ')[1] === b.split(' ')[1];
+  const time = es.length > 1 ? `${a}〜${sameDay ? b.split(' ')[2] : b}` : a;
+  if (es.length === 1) return `<div class="jn u"><small style="margin:0">${time}</small>⚙ 自動（行${rows[0]}）：${commandText(first.command)}</div>`;
+  const sum = new Map<DoseSupply, [number, number]>();
+  for (const e of es) if (e.command.type === 'dose') {
+    const v = sum.get(e.command.supply) ?? [0, 0];
+    sum.set(e.command.supply, [v[0] + e.command.amount, v[1] + 1]);
+  }
+  const parts = [...sum].map(([k, [a, n]]) => (SUPPLIES[k].unit === '回' ? `${SUPPLIES[k].name} ${n}回` : `${doseText(k, a)}（${n}回）`));
+  return `<div class="jn u"><small style="margin:0">${time}</small>⚙ 自動の操作 ×${es.length}（行${rows.join('・')}）：${parts.join('、')}</div>`;
 }
