@@ -83,5 +83,42 @@
       { "hour": 560, "kind": "pumpStop" }
     ],
     "goal": { "days": 30, "maxMisses": 2, "minProfit": 0 }
+  },
+  {
+    "id": "autoFirst",
+    "title": "無人で1周（自動制御）",
+    "brief": "ブロッコリーを自動制御ルールだけで育て、等級 S で収穫する。養液に手は入れない。ルールは ☰ の「⚙ ルールを組む」で組む。自動の操作は 30 回まで。",
+    "hint": "「ひな形」は上げる線と下げる線の間をあけてある（不感帯）。線を帯の真ん中に揃えると、上げては下げるを繰り返して回数が増える。",
+    "mode": "grow",
+    "crop": "broccoli",
+    "rules": true,
+    "best": "autoOps",
+    "goal": { "grade": "S", "maxManual": 0, "maxAuto": 30 }
+  },
+  {
+    "id": "autoThrifty",
+    "title": "自動で節約",
+    "brief": "ラディッシュを自動制御ルールだけで等級 S で収穫し、養液と調整剤の費用を 65 円以内に抑える。養液に手は入れない。",
+    "hint": "ひな形の pH の線は帯の内側 2 割で早めに入れる。pH が 5.5〜6.5 の中なら品質は落ちないので、pHダウンの線を 6.5 の近くまで上げると回数が減る。",
+    "mode": "grow",
+    "crop": "radish",
+    "rules": true,
+    "best": "supplies",
+    "goal": { "grade": "S", "maxManual": 0, "maxSupplies": 65 }
+  },
+  {
+    "id": "autoRecover",
+    "title": "自動で立て直す",
+    "brief": "pH 7.3・EC 0.5 の外れた養液から始まり、途中で停電が2回起きる。豆苗を自動制御ルールだけで等級 S で収穫する。自動の操作は 40 回まで。",
+    "hint": "入れた資材が混ざってセンサの読みに出るまで 30 分〜1 時間かかる。待ち時間がないと、読みが変わるまで入れ続けて行き過ぎる。待ち時間はセンサの更新（30 分）より長く。",
+    "mode": "grow",
+    "crop": "pea",
+    "rules": true,
+    "initial": { "ph": 7.3, "ec": 0.5 },
+    "schedule": [
+      { "hour": 40, "kind": "outage", "hours": 8 },
+      { "hour": 120, "kind": "outage", "hours": 6 }
+    ],
+    "goal": { "grade": "S", "maxManual": 0, "maxAuto": 40 }
   }
 ]

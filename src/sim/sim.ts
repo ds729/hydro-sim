@@ -201,6 +201,10 @@ export function setRules(s: SimState, rules: readonly Rule[]): void {
 /** 自動制御ルールが動かした操作の回数 */
 export const autoCount = (s: SimState) => s.log.filter(e => e.kind === 'command' && e.auto).length;
 
+/** 人が養液に手を入れた回数（資材と全交換。ポンプを直すのは数えない＝ルールでは直せない人の仕事） */
+export const manualCount = (s: SimState) =>
+  s.log.filter(e => e.kind === 'command' && !e.auto && e.command.type !== 'fixPump').length;
+
 /** センサの読みを今の栽培槽の値で取り直す（課題・症状診断の問題で栽培槽を直に作ったとき） */
 export function resampleSensors(s: SimState): void {
   s.trace = [];

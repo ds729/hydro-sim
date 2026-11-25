@@ -116,7 +116,7 @@ export class RulePanel {
   private render(): void {
     const p = $('rup'), head = '<div class="zh"><h2>⚙ 自動制御</h2><button data-ra="close" aria-label="閉じる">✕</button></div>';
     if (this.host.locked()) {
-      p.innerHTML = head + '<div class="zl"><p>課題の途中は自動制御を使えません（課題は手の操作で達成する条件です）。課題をやめると、保存したルールで続きから回ります。</p></div>';
+      p.innerHTML = head + '<div class="zl"><p>この課題の途中は自動制御を使えません（手の操作で達成する課題です。ルールを使う課題は一覧の「⚙ 自動制御」）。課題をやめると、保存したルールで続きから回ります。</p></div>';
       return;
     }
     const s = this.host.sim(), crop = CROPS[s.crop.id], { on, rules } = this.set;

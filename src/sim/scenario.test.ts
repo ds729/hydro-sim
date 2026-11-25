@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
-  answerQuiz, applyCommand, bedOf, createSim, ecOf, judgeScenario, nextQuestion, QUIZ_CAUSES, SCENARIOS, scenarioById, startScenario,
-  tick, validateScenario, type ScenarioRun,
+  answerQuiz, applyCommand, autoCount, bangBangRules, bedOf, createSim, ecOf, judgeScenario, nextQuestion, QUIZ_CAUSES, SCENARIOS, scenarioById,
+  setRules, startScenario, templateRules, tick, validateScenario, type Rule, type ScenarioRun,
 } from './index';
 import { farmPlan, farmRun, FERT, fixPumps, keepInBand, PH_DOWN, runToEnd, WATER } from './testplay';
 
@@ -13,10 +13,26 @@ function keepAtEdge(s: Parameters<typeof keepInBand>[0]) {
   if (v.ec < 0.85) applyCommand(s, FERT);
 }
 
-/** 課題を「帯に保つ操作」で最後まで遊ぶ（栽培は帯に保ってポンプを直す。資材を節約する課題は帯の端で戻す、診断は全問正解、経営は契約から逆算して播く） */
+/**
+ * 自動制御の課題の答えの例：ひな形のルール。「自動で節約」は pHダウンの線を帯の上端の近く（6.45）に上げる
+ * （ひな形の線 6.3 では早めに入れて 80 円かかる）
+ */
+function autoAnswer(id: string): Rule[] {
+  const sc = scenarioById(id), rules = templateRules(sc.crop!);
+  if (id === 'autoThrifty') rules[1] = { ...rules[1], threshold: 6.45 };
+  return rules;
+}
+
+/**
+ * 課題を「帯に保つ操作」で最後まで遊ぶ（栽培は帯に保ってポンプを直す。資材を節約する課題は帯の端で戻す、自動制御の課題はルールだけで回す、
+ * 診断は全問正解、経営は契約から逆算して播く）
+ */
 function play(run: ScenarioRun): ScenarioRun {
-  const days = scenarioById(run.scenario).goal.days ?? 30;
-  if (run.mode === 'grow') {
+  const sc = scenarioById(run.scenario), days = sc.goal.days ?? 30;
+  if (run.mode === 'grow' && sc.rules) {
+    setRules(run.sim, autoAnswer(run.scenario));
+    runToEnd(run.sim, fixPumps);
+  } else if (run.mode === 'grow') {
     const keep = run.scenario === 'thrifty' ? keepAtEdge : keepInBand;
     runToEnd(run.sim, s => { fixPumps(s); keep(s); });
   }
@@ -44,7 +60,11 @@ describe('課題（Phase 6）', () => {
   test('データ：id が重ならず、8 個前後で、栽培・症状診断・経営とイベントにまたがる。条件はモードに合う', () => {
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.length).toBeGreaterThanOrEqual(6);
-    expect(ids.length).toBeLessThanOrEqual(10);
+    expect(ids.length).toBeLessThanOrEqual(12);
+    // 自動制御の課題（v1.1）は 2〜3 個
+    const auto = SCENARIOS.filter(s => s.rules);
+    expect(auto.length).toBeGreaterThanOrEqual(2);
+    expect(auto.length).toBeLessThanOrEqual(3);
     for (const m of ['grow', 'quiz', 'farm']) expect(SCENARIOS.some(s => s.mode === m)).toBe(true);
     expect(SCENARIOS.some(s => s.schedule?.length || s.events)).toBe(true);
     // 初回の案内は最初の課題だけ
@@ -158,5 +178,68 @@ describe('課題（Phase 6）', () => {
 
   test('ない課題はエラー', () => {
     expect(() => startScenario('nope')).toThrow();
+  });
+});
+
+describe('自動制御の課題（v1.1）', () => {
+  const autoIds = SCENARIOS.filter(s => s.rules).map(s => s.id);
+  /** ルールを入れて終わるまで回す（人は何もしない。ポンプは直す） */
+  const withRules = (id: string, rules: Rule[]) => {
+    const run = startScenario(id);
+    if (run.mode !== 'grow') throw new Error();
+    setRules(run.sim, rules);
+    runToEnd(run.sim, fixPumps);
+    return { run, v: judgeScenario(run) };
+  };
+  const failed = (v: ReturnType<typeof judgeScenario>) => v.checks.filter(c => !c.ok).map(c => c.key);
+
+  test('ルールは自動制御の課題にだけ入る', () => {
+    const r = templateRules('radish');
+    const a = startScenario('autoThrifty', 1, r), b = startScenario('thrifty', 1, r);
+    if (a.mode !== 'grow' || b.mode !== 'grow') throw new Error();
+    expect(a.sim.control.rules).toHaveLength(r.length);
+    expect(b.sim.control.rules).toEqual([]);
+    expect(validateScenario({ ...scenarioById('thrifty'), goal: { maxAuto: 3 } })).not.toEqual([]);
+    expect(validateScenario({ ...scenarioById('contract'), rules: true })).not.toEqual([]);
+  });
+
+  test.each(autoIds)('%s：手で帯に保っても、養液に手を入れた時点で未達', id => {
+    const run = startScenario(id);
+    if (run.mode !== 'grow') throw new Error();
+    let failedAt: number | null = null;
+    runToEnd(run.sim, s => {
+      fixPumps(s); keepInBand(s);
+      if (failedAt === null && judgeScenario(run).status === 'failed') failedAt = s.hour;
+    });
+    expect(failedAt).not.toBeNull();
+    expect(failed(judgeScenario(run))).toContain('maxManual');
+  });
+
+  test('無人で1周：不感帯のない線（待ち時間はあり）だと S でも回数の上限を超え、ひな形なら 30 回以内', () => {
+    const flat = withRules('autoFirst', bangBangRules('broccoli').map(r => ({ ...r, waitMin: 60 })));
+    expect(flat.run.sim.result!.grade).toBe('S');
+    expect(failed(flat.v)).toEqual(['maxAuto']);
+    const ok = withRules('autoFirst', templateRules('broccoli'));
+    expect(ok.v.status).toBe('cleared');
+    // 自己ベストは自動の操作の回数（少ないほど良いので負の値）
+    expect(ok.v.score).toBe(-autoCount(ok.run.sim));
+  });
+
+  test('自動で節約：ひな形のままでは pH を早めに下げて上限を超え、線を帯の端に寄せると達成', () => {
+    const tmpl = withRules('autoThrifty', templateRules('radish'));
+    expect(tmpl.run.sim.result!.grade).toBe('S');
+    expect(failed(tmpl.v)).toEqual(['maxSupplies']);
+    const ok = withRules('autoThrifty', autoAnswer('autoThrifty'));
+    expect(ok.v.status).toBe('cleared');
+    expect(ok.v.score).toBe(-ok.run.sim.cost);
+  });
+
+  test('自動で立て直す：待ち時間なしは入れすぎて行き過ぎ、回数も等級も届かない。待ち時間 30 分（センサの間隔）なら達成', () => {
+    const tmpl = templateRules('pea');
+    const rush = withRules('autoRecover', tmpl.map(r => ({ ...r, waitMin: 0 })));
+    expect(failed(rush.v)).toEqual(expect.arrayContaining(['grade', 'maxAuto']));
+    expect(withRules('autoRecover', tmpl.map(r => ({ ...r, waitMin: 30 }))).v.status).toBe('cleared');
+    // 停電中は制御器が止まる（予定の2回とも起きる）
+    expect(rush.run.sim.log.filter(e => e.kind === 'outage').map(e => e.hour)).toEqual([40, 120]);
   });
 });

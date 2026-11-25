@@ -7,7 +7,8 @@ import { CROPS, GRADES, type Grade } from './crop';
 import type { ScheduledEvent } from './facility';
 import { createFarm, totals, type FarmState } from './farm';
 import { createQuiz, quizScore, type Quiz } from './quiz';
-import { bedOf, createSim, HYDROPONIC, resampleSensors, type SimState } from './sim';
+import type { Rule } from './rules';
+import { autoCount, bedOf, createSim, HYDROPONIC, manualCount, resampleSensors, type SimState } from './sim';
 
 /** 達成条件（書いたものをすべて満たす）。栽培は収穫が前提 */
 export interface ScenarioGoal {
@@ -25,7 +26,14 @@ export interface ScenarioGoal {
   maxMisses?: number;
   /** 経営：評判の下限 */
   minReputation?: number;
+  /** 栽培（自動制御の課題）：人が養液に手を入れてよい回数（資材・全交換。ポンプを直すのは数えない） */
+  maxManual?: number;
+  /** 栽培（自動制御の課題）：自動の操作の回数の上限 */
+  maxAuto?: number;
 }
+
+/** 栽培の自己ベストに使う値：品質（既定）・資材費（少ないほど良い）・自動の操作の回数（少ないほど良い） */
+export type ScenarioBest = 'quality' | 'supplies' | 'autoOps';
 
 export interface Scenario {
   id: string;
@@ -46,6 +54,10 @@ export interface Scenario {
   initial?: Partial<Solution>;
   /** 案内つき（初回の1周） */
   guide?: boolean;
+  /** 栽培：自動制御ルールを使える課題（v1.1）。始めるときに遊ぶ人のルールを入れる */
+  rules?: boolean;
+  /** 栽培：自己ベストに使う値（省くと品質） */
+  best?: ScenarioBest;
   goal: ScenarioGoal;
 }
 
@@ -64,12 +76,12 @@ export type ScenarioRun =
   | { scenario: string; mode: 'quiz'; quiz: Quiz }
   | { scenario: string; mode: 'farm'; farm: FarmState };
 
-/** 課題を始める。seed は課題にシードがないときに使う（画面は毎回変える） */
-export function startScenario(id: string, seed = 1): ScenarioRun {
+/** 課題を始める。seed は課題にシードがないときに使う（画面は毎回変える）。rules はルールを使える課題でだけ入れる */
+export function startScenario(id: string, seed = 1, rules: readonly Rule[] = []): ScenarioRun {
   const sc = scenarioById(id), s = sc.seed ?? seed;
   switch (sc.mode) {
     case 'grow': {
-      const sim = createSim({ crop: sc.crop, seed: s, events: sc.events, schedule: sc.schedule });
+      const sim = createSim({ crop: sc.crop, seed: s, events: sc.events, schedule: sc.schedule, rules: sc.rules ? rules : [] });
       if (sc.initial) {
         fill(bedOf(sim), { ...HYDROPONIC.compartments[0].initial, ...sc.initial });
         resampleSensors(sim);
@@ -95,7 +107,10 @@ export interface Verdict {
   /** running：まだ決まらない、cleared：達成、failed：未達（終わった、または取り返せない） */
   status: 'running' | 'cleared' | 'failed';
   checks: GoalCheck[];
-  /** 自己ベストに使う値（大きいほど良い）。栽培は品質、症状診断は正答数、経営は利益 */
+  /**
+   * 自己ベストに使う値（大きいほど良い）。栽培は品質（課題の best が supplies なら資材費、autoOps なら自動の操作の回数を負にした値）、
+   * 症状診断は正答数、経営は利益
+   */
   score: number | null;
 }
 
@@ -111,14 +126,20 @@ export function judgeScenario(run: ScenarioRun): Verdict {
   };
 
   if (run.mode === 'grow') {
-    const r = run.sim.result, harvested = r?.outcome === 'harvest';
+    const r = run.sim.result, harvested = r?.outcome === 'harvest', manual = manualCount(run.sim), auto = autoCount(run.sim);
     add('harvest', true, r ? harvested : null, harvested);
     if (g.grade) add('grade', g.grade, r && harvested ? r.grade : null, !!r && harvested && gradeRank(r.grade) <= gradeRank(g.grade));
     // 資材費は途中でも分かる。上限を超えたら取り返せない
     if (g.maxSupplies !== undefined) add('maxSupplies', g.maxSupplies, run.sim.cost, run.sim.cost <= g.maxSupplies);
     if (g.minProfit !== undefined) add('minProfit', g.minProfit, r ? r.profit : null, !!r && r.profit >= g.minProfit);
-    const over = g.maxSupplies !== undefined && run.sim.cost > g.maxSupplies;
-    return verdict(!!r, r && harvested ? r.quality : null, over);
+    // 回数の上限も途中で超えたら取り返せない
+    if (g.maxManual !== undefined) add('maxManual', g.maxManual, manual, manual <= g.maxManual);
+    if (g.maxAuto !== undefined) add('maxAuto', g.maxAuto, auto, auto <= g.maxAuto);
+    const over = (g.maxSupplies !== undefined && run.sim.cost > g.maxSupplies)
+      || (g.maxManual !== undefined && manual > g.maxManual) || (g.maxAuto !== undefined && auto > g.maxAuto);
+    const best = scenarioById(run.scenario).best ?? 'quality';
+    const score = !r || !harvested ? null : best === 'supplies' ? -run.sim.cost : best === 'autoOps' ? -auto : r.quality;
+    return verdict(!!r, score, over);
   }
 
   if (run.mode === 'quiz') {
@@ -149,7 +170,8 @@ export function validateScenario(sc: Scenario): string[] {
   };
   if (sc.mode === 'grow') {
     if (!sc.crop || !CROPS[sc.crop]) errs.push(`${sc.id}：作物 ${sc.crop} がない`);
-    only(['grade', 'maxSupplies', 'minProfit']);
+    only(['grade', 'maxSupplies', 'minProfit', 'maxManual', 'maxAuto']);
+    if (!sc.rules && (g.maxManual !== undefined || g.maxAuto !== undefined)) errs.push(`${sc.id}：maxManual・maxAuto はルールを使える課題だけ`);
   } else if (sc.mode === 'quiz') {
     if (g.minScore === undefined) errs.push(`${sc.id}：minScore がない`);
     only(['minScore']);
@@ -157,5 +179,6 @@ export function validateScenario(sc: Scenario): string[] {
     if (g.days === undefined) errs.push(`${sc.id}：days がない`);
     only(['days', 'maxMisses', 'minProfit', 'minReputation']);
   }
+  if (sc.mode !== 'grow' && (sc.rules || sc.best)) errs.push(`${sc.id}：rules・best は栽培の課題だけ`);
   return errs;
 }

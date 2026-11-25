@@ -38,5 +38,15 @@ describe('図鑑のデータ（zukan.json）', () => {
     }
     for (const v of ZUKAN.costs) expect(fill(v.value)).not.toMatch(/\{|\}|^$/);
     expect(fill('{price}', 'fertilizer')).toBe('0.1円/mL');
+    expect(fill('{mixTau}')).toBe('30分（1時間で 86%・2時間で 98% 混ざる）');
+  });
+
+  it('自動制御（v1.1）：説明と、遅れの時定数・センサの更新間隔の札（ゲーム都合）がある', () => {
+    const ctl = ZUKAN.equipment.find(e => e.id === 'control')!, tank = ZUKAN.equipment.find(e => e.id === 'tank')!;
+    expect(ctl.note && ctl.fix).toBeTruthy();
+    const vals = [...ctl.values, ...tank.values];
+    for (const v of ['{sensorInterval}', '{stepMin}', '{mixTau}', '{mixTauStopped}']) {
+      expect(vals.find(x => x.value === v)?.s, v).toBe('game');
+    }
   });
 });

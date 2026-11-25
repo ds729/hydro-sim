@@ -91,7 +91,9 @@ const valueLine = (label: string, value: string, n: SourceNote) => `<span class=
 
 /** 値の文字列の {名前} を、データから作った値に置き換える（数値を2か所に持たない） */
 export function fill(text: string, id?: string): string {
-  const L = FACILITY.light, ch = BUSINESS.channels;
+  const L = FACILITY.light, ch = BUSINESS.channels, C = FACILITY.control;
+  /** 入れてから m 分で混ざる割合 %（時定数の1次遅れ） */
+  const mixed = (m: number) => Math.round((1 - Math.exp(-m / C.mixTauMin)) * 100);
   const vars: Record<string, string> = {
     price: id && id in SUPPLIES ? `${SUPPLIES[id as SupplyId].pricePerUnit}円/${SUPPLIES[id as SupplyId].unit}` : '',
     medium: `1トレイ ${BUSINESS.mediumYenPerTray}円`,
@@ -104,6 +106,10 @@ export function fill(text: string, id?: string): string {
     darkRatio: `昼の ${L.darkUptakeRatio} 倍`,
     outage: `平均 ${FACILITY.outage.meanIntervalDays}日に1回・${FACILITY.outage.hours[0]}〜${FACILITY.outage.hours[1]}時間`,
     pump: `ポンプ1台あたり平均 ${FACILITY.pump.meanIntervalDays}日に1回`,
+    mixTau: `${C.mixTauMin}分（1時間で ${mixed(60)}%・2時間で ${mixed(120)}% 混ざる）`,
+    mixTauStopped: `${C.mixTauStoppedMin}分（${C.mixTauStoppedMin / 60}時間）`,
+    sensorInterval: `${C.sensorIntervalMin}分ごと`,
+    stepMin: `${C.stepMin}分ごと`,
   };
   return text.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? '');
 }
@@ -139,7 +145,8 @@ function supplyHtml(): string {
 }
 
 function equipmentHtml(): string {
-  const basic = ZUKAN.equipment.map(e => entry(true, `${e.icon} ${e.name}`, '', `<p>${e.note}</p>${e.values.length ? `<div class="zvs">${values(e)}</div>` : ''}`)).join('');
+  const basic = ZUKAN.equipment.map(e => entry(true, `${e.icon} ${e.name}`, '',
+    `<p>${e.note}</p>${e.fix ? `<p>💡 ${e.fix}</p>` : ''}${e.values.length ? `<div class="zvs">${values(e)}</div>` : ''}`)).join('');
   const biz = (Object.entries(BUSINESS.equipment) as [EquipmentId, (typeof BUSINESS.equipment)[EquipmentId]][]).map(([id, q]) => {
     const z = ZUKAN.equipmentBusiness[id];
     return entry(seen.equipment.includes(id), `${z.icon} ${q.name}`, '買った', `<p>${q.note}</p><div class="zvs">`
@@ -165,9 +172,15 @@ function recordHtml(): string {
     return `<tr class="${g ? '' : 'un'}"><td>${shortName(c.name)}${g ? `<small>収穫 ${g.harvests}回</small>` : ''}</td>`
       + `<td>${g ? `${qualityText(g.quality)}<br>利益 ${yen(g.profit)}` : '—'}</td></tr>`;
   }).join('');
+  const auto = Object.entries(CROPS).map(([id, c]) => {
+    const a = b.auto[id];
+    return `<tr class="${a ? '' : 'un'}"><td>${shortName(c.name)}${a ? `<small>無人で収穫 ${a.runs}回</small>` : ''}</td>`
+      + `<td>${a ? `${qualityText(a.quality)}${a.supplies !== null ? `<br>S の最少：資材費 ${yen(a.supplies)}・操作 ${a.ops}回` : ''}` : '—'}</td></tr>`;
+  }).join('');
   const q = b.quiz, f = b.farm;
   return `<h3>🎯 課題 ${done}/${SCENARIOS.length}</h3><table class="zr">${tasks}</table>`
     + `<h3>🌱 栽培（自由に遊んだとき）</h3><table class="zr">${grow}</table>`
+    + `<h3>⚙ 自動制御（ルールだけで収穫したとき）</h3><table class="zr">${auto}</table>`
     + `<h3>🔍 症状診断・📒 経営（自由に遊んだとき）</h3><table class="zr">`
     + `<tr class="${q ? '' : 'un'}"><td>診断の最高の正答数${q ? `<small>${q.plays}周</small>` : ''}</td><td>${q ? `${q.best}/${q.of} 問` : '—'}</td></tr>`
     + `<tr class="${f ? '' : 'un'}"><td>最高の月の利益${f ? `<small>${f.month}か月目</small>` : ''}</td><td>${f ? yen(f.monthProfit) : '—'}</td></tr>`

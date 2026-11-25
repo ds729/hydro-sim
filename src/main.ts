@@ -2,7 +2,7 @@
 
 import './ui/style.css';
 import {
-  applyCommand, BUSINESS, totals, createFarm, createSim, CROPS, cropSpec, farmTick, judgeScenario, scenarioById, startOutage, setRules, startScenario, stopPump, templateRules, tick,
+  applyCommand, autoCount, BUSINESS, totals, createFarm, createSim, CROPS, cropSpec, farmTick, judgeScenario, manualCount, scenarioById, startOutage, setRules, startScenario, stopPump, templateRules, tick,
   type Command, type Rule, type FarmCommand, type FarmState, type ScenarioRun, type SimState, type Verdict,
 } from './sim';
 import { PRESETS, type PresetName } from './render/camera';
@@ -148,10 +148,11 @@ const evBtns = ([[false, 'なし'], [true, 'あり']] as const).map(([v, label])
   return [v, b] as const;
 });
 
-// 自動制御（栽培モードの ☰ と HUD の「⚙ 自動運転中」）。ルールはこのブラウザに保存し、課題の途中は使えない
+// 自動制御（栽培モードの ☰ と HUD の「⚙ 自動運転中」）。ルールはこのブラウザに保存する。
+// 栽培の課題の途中は、自動制御の課題（rules）でなければ使えない
 const rules = new RulePanel({
   sim: () => s,
-  locked: () => !!task && scenarioById(task.id).mode === 'grow',
+  locked: () => !!task && scenarioById(task.id).mode === 'grow' && !scenarioById(task.id).rules,
   apply: r => { setRules(s, r); dirty = true; },
 });
 $('ruo').onclick = () => { rules.open(); if (app.classList.contains('so')) menu.click(); };
@@ -184,7 +185,8 @@ function taskRun(): ScenarioRun | null {
 /** 課題を始める（課題中なら今の課題をやめてから） */
 function startTask(id: string) {
   if (task) endTask();
-  const sc = scenarioById(id), run = startScenario(id, newSeed());
+  // 自動制御の課題は遊ぶ人の保存したルールで始める（ほかの課題には入らない）
+  const sc = scenarioById(id), run = startScenario(id, newSeed(), activeRules(rules.set));
   task = { id, finished: false, stash: { s, farm: null } };
   $('res').style.display = 'none';
   if (run.mode === 'grow') { setSim(run.sim); setMode('grow'); }
@@ -201,14 +203,21 @@ function endTask() {
   const { stash, id } = task;
   task = null;
   guide.stop();
-  if (scenarioById(id).mode === 'grow') { stash.s.facility.events = growEvents; setSim(stash.s); }
+  const sc = scenarioById(id);
+  if (sc.mode === 'grow') {
+    stash.s.facility.events = growEvents;
+    // 自動制御の課題の途中でルールを組み直したら、元の続きにも入れる
+    if (sc.rules) setRules(stash.s, activeRules(rules.set));
+    setSim(stash.s);
+  }
   if (stash.farm) farm.reset(stash.farm);
   dirty = true;
 }
 
-/** 課題のボタン（目標の欄・結果画面・終わりの窓）：quit＝やめる、retry＝もう一度、list＝一覧 */
+/** 課題のボタン（目標の欄・結果画面・終わりの窓）：quit＝やめる、retry＝もう一度、list＝一覧、rules＝ルールの窓 */
 function taskAction(a: string) {
-  if (a === 'retry' && task) startTask(task.id);
+  if (a === 'rules') rules.open();
+  else if (a === 'retry' && task) startTask(task.id);
   else if (a === 'list') openTasks(startTask, task?.id ?? null);
   else if (a === 'quit' && task) {
     const quizTask = scenarioById(task.id).mode === 'quiz';
@@ -386,7 +395,7 @@ function loop(now: number) {
       resultShown = true;
       const t = task && taskVerdict ? { html: verdictHtml(scenarioById(task.id), taskVerdict), onAction: taskAction } : undefined;
       // 自由に遊んだ収穫は自己ベストに（課題は課題の記録）
-      showResult(s.result, s.crop.id, restart, t, t ? '' : recordGrow(s.crop.id, s.result));
+      showResult(s.result, s.crop.id, restart, t, t ? '' : recordGrow(s.crop.id, s.result, { manual: manualCount(s), auto: autoCount(s) }));
       if (s.result.outcome === 'harvest') sound.play('harvest');
     }
   } else if (dirty || sinceHud > 0.1) { if (mode === 'farm') farm.update(); updateAlarm(); updateTask(); dirty = false; sinceHud = 0; }

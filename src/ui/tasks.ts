@@ -52,10 +52,11 @@ export function clearTasks(): void {
   save();
 }
 
-/** 自己ベストの表示（栽培は等級と品質、症状診断は正答数、経営は期間の利益） */
+/** 自己ベストの表示（栽培は等級と品質か、課題の best に合わせて資材費・自動の操作の回数。症状診断は正答数、経営は期間の利益） */
 export function bestText(id: string, score: number): string {
-  const m = scenarioById(id).mode;
-  return m === 'grow' ? qualityText(score) : m === 'quiz' ? `${score} 問正解` : `利益 ${yen(score)}`;
+  const sc = scenarioById(id), m = sc.mode;
+  if (m === 'grow') return sc.best === 'supplies' ? `資材費 ${yen(-score)}` : sc.best === 'autoOps' ? `自動の操作 ${-score} 回` : qualityText(score);
+  return m === 'quiz' ? `${score} 問正解` : `利益 ${yen(score)}`;
 }
 
 export const MODE: Record<Scenario['mode'], string> = { grow: '🌱 栽培', quiz: '🔍 症状診断', farm: '📒 経営' };
@@ -72,22 +73,30 @@ function checkText(c: GoalCheck): [string, string] {
     case 'days': return [`${c.target} 日回す`, `${v} 日`];
     case 'maxMisses': return [`欠品 ${c.target} 回以内`, `${v} 回`];
     case 'minReputation': return [`評判 ${c.target} 以上`, `${v}`];
+    case 'maxManual': return [c.target === 0 ? '養液に手を入れない' : `手の操作 ${c.target} 回まで`, `${v} 回`];
+    case 'maxAuto': return [`自動の操作 ${c.target} 回まで`, `${v} 回`];
   }
 }
+
+/** 上限の条件（途中で超えたら ✗ が決まる。超えるまでは ✓） */
+const UPPER: GoalCheck['key'][] = ['maxSupplies', 'maxMisses', 'maxManual', 'maxAuto'];
 
 /** 条件の一覧。進行中で未達成の条件は「・」、決まったら ✓ / ✗ */
 export function checksHtml(v: Verdict): string {
   return '<ul class="tc">' + v.checks.map(c => {
-    const [t, val] = checkText(c), mark = c.ok ? '✓' : v.status === 'running' && !(c.key === 'maxSupplies' || c.key === 'maxMisses') ? '・' : '✗';
+    const [t, val] = checkText(c), mark = c.ok ? '✓' : v.status === 'running' && !UPPER.includes(c.key) ? '・' : '✗';
     return `<li class="${mark === '✓' ? 'ok' : mark === '✗' ? 'ng' : ''}"><i>${mark}</i>${t}<span>${val}</span></li>`;
   }).join('') + '</ul>';
 }
 
 const STATUS: Record<Verdict['status'], string> = { running: '', cleared: '<b class="ok">達成！</b>', failed: '<b class="ng">未達</b>' };
 
-/** 課題中の目標（HUD の上、#tg）。やめる・もう一度・一覧・終えるのボタンは data-ta で main が受ける */
+/** 課題中の目標（HUD の上、#tg）。やめる・もう一度・一覧・終える・ルール（自動制御の課題）のボタンは data-ta で main が受ける */
 export function goalHtml(sc: Scenario, v: Verdict): string {
-  if (v.status === 'running') return `<div class="th"><b>🎯 ${sc.title}</b><span><button data-ta="quit">やめる</button></span></div>${checksHtml(v)}`;
+  if (v.status === 'running') {
+    const ru = sc.rules ? '<button data-ta="rules" title="自動制御のルールを組む">⚙ ルール</button>' : '';
+    return `<div class="th"><b>🎯 ${sc.title}</b><span>${ru}<button data-ta="quit">やめる</button></span></div>${checksHtml(v)}`;
+  }
   return `<div class="th"><b>🎯 ${sc.title}</b>${STATUS[v.status]}</div>${checksHtml(v)}`
     + '<div class="g3 tb"><button data-ta="retry">もう一度</button><button data-ta="list">一覧</button><button data-ta="quit" title="課題を終えて、元の続きに戻る">終える</button></div>';
 }
@@ -124,7 +133,7 @@ export function openTasks(onStart: (id: string) => void, current: string | null)
       const r = records[sc.id], crop = sc.crop ? `・${shortName(CROPS[sc.crop].name)}` : '';
       const best = r?.best !== null && r?.best !== undefined ? `<br>🏆 自己ベスト ${bestText(sc.id, r.best)}` : '';
       return `<div class="ze${r?.cleared ? '' : ' un'}"><b>${i + 1}. ${sc.title}</b>${r?.cleared ? '<em class="zb">✓ 達成</em>' : ''}`
-        + `<small>${MODE[sc.mode]}${crop}${sc.guide ? '・案内つき' : ''}${best}</small><p>${sc.brief}</p>`
+        + `<small>${MODE[sc.mode]}${crop}${sc.guide ? '・案内つき' : ''}${sc.rules ? '・⚙ 自動制御' : ''}${best}</small><p>${sc.brief}</p>`
         + `<button data-id="${sc.id}">${sc.id === current ? 'はじめから' : '挑戦する'}</button></div>`;
     }).join('') + '</div><small class="zn">課題の途中で別のモード・作物に変えると、課題をやめて元の続きに戻ります。</small>';
   box.style.display = 'flex';
